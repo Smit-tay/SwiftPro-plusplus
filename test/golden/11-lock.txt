@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MIT
+# Per-joint lock and unlock (SP-08, Q-6, Q-7, Q-41).
+# N numbers the joints as in G2202 everywhere: 0 base, 1 L, 2 R, 3 wrist/effector.
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# Releasing the base releases only the base, and M2203 reports it under N0.
+# (The original enables all three drivers again on M2201/the next move, and M2203 N0 reports L.)
+#: change SP-08 Q-41
+> #1 M2202 N0
+< $1 ok
+> #2 M2203 N0
+< $2 ok V0
+> #3 M2203 N1
+< $3 ok V1
+> #4 M2203 N2
+< $4 ok V1
+
+# Release L, move it by hand (the encoder changes), lock it again: the tally is re-read from that encoder (Q-6).
+# L = 32.758930 - wrap(2673 - 2900) * 360/4096 = 52.710102 (uarm_angle.c:136-160).
+#: change SP-08 Q-6
+> #5 M2202 N1
+< $5 ok
+= enc.raw B1654 L2900 R1403
+> #6 M2201 N1
+< $6 ok
+> #7 M2203 N1
+< $7 ok V1
+> #8 P2206 N1
+< $8 ok V52.7101
+> #9 M2120 V0.2
+< $9 ok
+~ ms 250
+<re ^@3 X-?[0-9]+\.[0-9]{4} Y-?[0-9]+\.[0-9]{4} Z-?[0-9]+\.[0-9]{4} R89\.1000 B-0\.0879 L52\.7101 AR66\.0411 M.*$
+> #10 M2121
+< $10 ok
+
+# Releasing the wrist stops its PWM (Q-7); M2203 N3 then reports 0.
+#: change SP-08 Q-7
+> #11 M2202 N3
+< $11 ok
+> #12 M2203 N3
+< $12 ok V0

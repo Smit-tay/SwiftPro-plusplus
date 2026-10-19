@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MIT
+# Boot banner and the first events.
+# State: your arm as probed on 2026-10-17 (the probe log of 2026-10-17).
+
+= hw V3.3.1
+= mode 0
+= power 1
+
+#: change SP-14 Q-41 (the debug line "angle offset:..." before the banner is removed, uarm_peripheral.c:381-383)
+#: faithful uarm_swift.c:29-34 (banner, then @1)
+#: change Q-2 (soft ver is V5.0.0-pp.1)
+~ boot
+< device name : SwiftPro\r
+< soft ver : V5.0.0-pp.1\r
+< api ver : V4.0.5\r
+< work mode : 0\r
+< @1
+
+# power_per_status starts at 0, so the first poll after boot reports motor power.
+#: faithful uarm_protocol.c:203-214 (@5 on change, first poll after 256 loop passes)
+~ ms 100
+< @5 V1

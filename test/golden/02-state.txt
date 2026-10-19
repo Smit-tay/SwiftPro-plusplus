@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MIT
+# Encoder and kinematics queries with the arm at rest. Values were measured on your arm (2026-10-17).
+# The encoder state reproduces that pose: angle = pointB - wrap(ref - raw) * 360/4096 (uarm_angle.c:136-224).
+
+= hw V3.3.1
+= mode 0
+= power 1
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+#: measured probe-20261017 #11
+#: faithful uarm_protocol.c:1523-1564
+> #11 P2244
+< $11 ok V0
+
+#: measured probe-20261017 #12
+#: faithful uarm_protocol.c:1512-1516 (reference counts)
+> #12 P2242
+< $12 ok B1655 L2673 R1664
+
+#: measured probe-20261017 #13
+#: faithful uarm_protocol.c:1518-1521 (raw counts)
+> #13 P2243
+< $13 ok B1654 L2820 R1403
+
+#: measured probe-20261017 #14
+#: faithful uarm_protocol.c:1355-1368 (B in the user frame)
+> #14 P2200
+< $14 ok B89.9121 L45.6789 R66.0411
+
+#: measured probe-20261017 #15
+#: faithful uarm_protocol.c:1419-1437 (encoders -> FK -> effector frame, mode 0 offsets)
+> #15 P2220
+< $15 ok X233.6009 Y-0.3583 Z-10.6346
+
+#: measured probe-20261017 #23
+#: faithful uarm_protocol.c:573-575
+> #23 M2200
+< $23 ok V0
+
+# P2206 reads one joint the same way as P2200 (not measured; same arithmetic as #14).
+#: faithful uarm_protocol.c:1391-1417 (P2206)
+> #24 P2206 N0
+< $24 ok V89.9121
+> #25 P2206 N1
+< $25 ok V45.6789
+> #26 P2206 N2
+< $26 ok V66.0411

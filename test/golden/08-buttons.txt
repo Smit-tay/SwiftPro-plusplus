@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MIT
+# Base buttons (SP-44, Q-29, Q-30, Q-31). Report only. Format from the V4.0.5 doc: @4 N<0 Menu|1 Play> V<1|2>.
+# V1 = click, V2 = long press (held 1 s or more). The event is sent on release.
+# M2213 V0 turns the reports on ("default function off" in the doc); after boot they are off (V1).
+
+= mode 0
+~ boot quiet
+
+# Reports are off after boot: a click produces nothing.
+#: new SP-44 Q-29
+= button menu down
+~ ms 100
+= button menu up
+~ ms 100
+
+#: new SP-44 Q-29
+> #1 M2213 V0
+< $1 ok
+
+#: new SP-44 Q-30
+= button menu down
+~ ms 100
+= button menu up
+~ ms 100
+< @4 N0 V1
+
+#: new SP-44 Q-30
+= button play down
+~ ms 1200
+= button play up
+~ ms 100
+< @4 N1 V2
+
+# A 10 ms glitch is not a press (debounce, proposed: 3 samples 10 ms apart).
+#: new SP-44 Q-29
+= button play down
+~ ms 10
+= button play up
+~ ms 100
+
+#: new SP-44 Q-29
+> #2 M2213 V1
+< $2 ok
+= button menu down
+~ ms 100
+= button menu up
+~ ms 100

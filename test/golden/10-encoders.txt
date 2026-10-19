@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: MIT
+# Encoder health (SP-42, Q-27) and lost-step detection (SP-41, Q-26).
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# A chip that doesn't answer reads as all ones, which the original already reports (mask: 4 = L, 2 = R, 1 = B).
+#: faithful uarm_angle.c:82-125, uarm_protocol.c:1523-1564, 1654-1659, 126-131 (tail is appended to error codes too)
+= enc.nack L
+> #1 P2244
+< $1 E26 V4
+
+# No magnet (MD = 0, STATUS 0): the original says healthy; the port reports a fault.
+#: change SP-42 Q-27
+= enc.nack none
+= enc.status B0 L32 R32
+> #2 P2244
+< $2 E26 V1
+
+# A weak magnet (ML) is a warning, not a fault: P2244 stays V0. P2246 shows the detail.
+# P2246 format PROPOSED: per joint <STATUS>,<AGC>,<MAGNITUDE>, or "-" if the chip doesn't answer.
+#: new SP-42 Q-27 (P2246 format proposed)
+= enc.status B48 L32 R32
+> #3 P2244
+< $3 ok V0
+> #4 P2246
+<re ^\$4 ok B48,[0-9]+,[0-9]+ L32,[0-9]+,[0-9]+ R32,[0-9]+,[0-9]+$
+= enc.nack R
+> #5 P2246
+<re ^\$5 ok B48,[0-9]+,[0-9]+ L32,[0-9]+,[0-9]+ R-$
+
+# SP-15: a chip that doesn't answer makes every angle query fail with E26. The original read 0xFF bytes, turned the
+# median into 0 and replied "ok" with a plausible wrong angle.
+#: change SP-15 Q-41
+= enc.nack B
+> #6 P2200
+< $6 E26
+> #7 P2220
+< $7 E26
+> #8 P2206 N0
+< $8 E26
+> #9 P2243
+< $9 E26
+# The other joints still read.
+> #10 P2206 N1
+< $10 ok V45.6789
+
+# A failed boot read (SP-62): the drivers still hold the arm (R-9 revised), moves get E26, and as soon as the
+# background readings of every locked joint are healthy, the position is taken from them (Q-69).
+= enc.nack L
+~ boot quiet
+#: change SP-62 Q-69
+> #20 M2203 N1
+< $20 ok V1
+> #21 G2202 N0 V95 F100
+< $21 E26
+= enc.nack none
+~ ms 100
+> #22 G2202 N0 V95 F100
+~ idle
+< $22 ok
+> #23 P2206 N1
+< $23 ok V45.6789

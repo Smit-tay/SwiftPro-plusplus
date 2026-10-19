@@ -1,0 +1,97 @@
+//SwiftPro++ bring-up, stage 3: features. *** THIS FILE MOVES THE ARM. ***
+//Run with: tools/bringup/run.sh tools/bringup/stage3-features.txt
+//Clear a 300 mm radius around the base and keep a hand on the power switch.
+//The arm reboots when the script opens the port; it must be in the probe pose (about B90 L46 R66).
+#1 P2200
+#2 M2203 N0
+#3 M2203 N1
+#4 M2203 N2
+//ask Check: #1 about B90 L46 R66, and #2-#4 all "ok V1" (position read at boot, drivers on). If not, press Ctrl-C.
+
+//0. Feed hold: base 90 -> 130 at F20 (about 1.6 s), held 0.4 s in. Expect $12 ok V1 (moving, held)
+& #10 G2202 N0 V130 F20
+//wait 0.4
+& #11 S1000 V0
+//wait 0.3
+#12 M2200
+//ask The base should be standing still now (held). Press Enter to resume.
+& #13 S1000 V1
+//wait 2.5
+#14 P2200
+#15 G2202 N0 V90 F20
+#16 P2200
+
+//1. To the acceptance test pose (B90 L70 R40, about X240 Z64): L up first, then R down
+#20 G2202 N1 V70 F100
+#21 G2202 N2 V40 F100
+#22 P2200
+#23 P2220
+
+//2. Linear moves (G1): a 40 mm square at the test height, F50. The effector should travel straight edges
+#30 G1 X260 Y20 Z64 F50
+#31 P2220
+#32 G1 X260 Y-20 Z64 F50
+#33 P2220
+#34 G1 X220 Y-20 Z64 F50
+#35 P2220
+#36 G1 X220 Y20 Z64 F50
+#37 P2220
+#38 G1 X240 Y0 Z64 F50
+#39 P2220
+
+//3. Streamed moves (M2124 V1): five replies at once, the arm runs the square WITHOUT STOPPING at the corners,
+//then "@9 V0" when it stops
+//ask Watch the corners of the next square. Press Enter to start.
+#40 M2122 V1
+#41 M2124 V1
+#42 G0 X260 Y20 Z64 F100
+#43 G0 X260 Y-20 Z64 F100
+#44 G0 X220 Y-20 Z64 F100
+#45 G0 X220 Y20 Z64 F100
+#46 G0 X240 Y0 Z64 F100
+//wait 6
+#47 M2124 V0
+#48 M2122 V0
+//ask Did it run through the corners without stopping? Note it for the report. Press Enter to go on.
+
+//4. Wrist: 45, 135, 90 deg
+#50 G2202 N3 V45
+//wait 1
+#51 G2202 N3 V135
+//wait 1
+#52 G2202 N3 V90
+#53 P2206 N3
+//ask If a pump or a gripper is fitted, the next steps switch it on for 1 s each. Press Enter.
+#54 M2231 V1
+//wait 1
+#55 P2231
+#56 M2231 V0
+#57 M2232 V1
+//wait 1
+#58 P2232
+#59 M2232 V0
+
+//5. Release and re-lock L (Q-6)
+#60 P2200
+//ask SUPPORT THE ARM with one hand: L is released next and the upper arm may drop. Press Enter when ready.
+#61 M2202 N1
+//ask Move L a few degrees by hand and hold it there. Press Enter: L is locked again and re-read.
+#62 M2201 N1
+#63 P2200
+#64 M2120 V0.2
+//wait 0.5
+#65 M2121
+//ask L is holding again; you can let go. Press Enter.
+
+//6. Lost-step check (optional): the base turns slowly 90 -> 110 at F20. Hold it gently still with your hand;
+//expect "@8 N0 V..." and "$70 E25", and the arm stops. To skip, just don't touch it
+//ask Ready? Press Enter to start the base move.
+#70 G2202 N0 V110 F20
+#71 P2200
+#72 G2202 N0 V90 F20
+#73 P2200
+
+//7. Back to the probe pose: R up first, then L down
+#80 G2202 N2 V66 F100
+#81 G2202 N1 V46 F100
+#82 P2200

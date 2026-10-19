@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MIT
+# Streaming replies (SP-45, Q-32). After M2124 V1, a motion command's "ok" means "accepted into the planner".
+# Non-motion sync commands still wait for motion idle (Q-5). M2124 V0, the boot default, is faithful.
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+#: faithful uarm_protocol.c:549-560
+> #1 M2122 V1
+< $1 ok
+
+#: new SP-45 Q-32
+> #2 M2124 V1
+< $2 ok
+
+# Two moves are accepted at once, so the planner can blend them.
+#: new SP-45 Q-32
+> #3 G2202 N0 V100 F1000
+< $3 ok
+> #4 G2202 N0 V80 F1000
+< $4 ok
+
+# A non-motion command waits for idle, then replies. "@9 V0" marks the end of the motion.
+#: new SP-45 Q-32
+#: change SP-06 Q-5
+> #5 M2121
+~ idle
+< @9 V0
+< $5 ok
+
+# Errors are still reported at once.
+#: new SP-45 Q-32
+> #6 G2202 N9 V0 F1000
+< $6 E21
+
+# Back to faithful replies.
+#: new SP-45 Q-32
+> #7 M2124 V0
+< $7 ok
+
+#: faithful uarm_protocol.c:167-182, 216-221
+> #8 G2202 N0 V90 F1000
+~ idle
+< $8 ok
+< @9 V0

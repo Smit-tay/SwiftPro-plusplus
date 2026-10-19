@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: MIT
+# Lost-step detection during moves (SP-41, Q-26).
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# Lost steps: the L encoder stops following its motor during a move. After two consecutive readings more than 1.0 deg
+# off, the move stops, "@8" names the joint and its error, and the move gets E25.
+# @8 format PROPOSED: @8 N<joint as in G2202: 0 B, 1 L, 2 R> V<tally minus encoder, deg, 4 decimals>.
+#: new SP-41 Q-26 (@8 format proposed)
+= enc.nack none
+= enc.status B32 L32 R32
+= enc.stall L
+> #6 G2202 N1 V80 F1000
+~ idle
+<re ^@8 N1 V-?[0-9]+\.[0-9]{4}$
+< $6 E25
+
+# After the stop, the tally was re-synced from the encoders (Q-6): L is back at the stalled encoder's angle.
+#: new SP-41 Q-6
+> #7 P2206 N1
+< $7 ok V45.6789
+= enc.stall none
+
+# A normal move, with every encoder following its motor: no @8.
+#: new SP-41 Q-26
+> #8 G2202 N1 V80 F1000
+~ idle
+< $8 ok
+
+# A released joint is not checked: its encoder may be anywhere.
+#: new SP-41 Q-26
+> #9 M2202 N0
+< $9 ok
+= enc.stall B
+> #10 G2202 N1 V60 F1000
+~ idle
+< $10 ok
+= enc.stall none
+
+# The same on R, which stalls 10 ms into the move.
+#: new SP-41 Q-26
+> #11 G2202 N2 V70 F1000
+~ ms 10
+= enc.stall R
+~ idle
+<re ^@8 N2 V-?[0-9]+\.[0-9]{4}$
+< $11 E25
+
+# M2125 V0 turns the check off (Q-61): a stalled encoder goes unnoticed. V1 turns it back on; anything else is E21.
+#: new Q-61
+> #12 M2125 V0
+< $12 ok
+= enc.stall L
+> #13 G2202 N1 V75 F1000
+~ idle
+< $13 ok
+= enc.stall none
+> #14 M2125 V1
+< $14 ok
+> #15 M2125 V2
+< $15 E21

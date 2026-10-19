@@ -1,0 +1,155 @@
+//SwiftPro acceptance baseline, state H, for the ORIGINAL firmware (V4.9.1-jss.7).
+//*** THIS FILE MOVES THE ARM. *** Clear a 300 mm radius around the base, keep a hand on the power switch.
+//Run with tools/probe/probe-send.sh (picocom --send-cmd), straight after a POWER-CYCLE of the arm.
+//PRECONDITION: the arm starts in the probe pose, P2200 about B90 L46 R66 (X234 Z-11). The height check below
+//is only valid from there. Test pose = B90 L70 R40 (about X240 Z64).
+//Every move keeps the effector at or above its starting height (checked with the FK verified on your arm).
+//After each move: P2243 = raw encoder counts, P2200 = encoder angles, then 2-3 "@3" lines = the step tally.
+//Pass: P2200 within 0.088 deg (one count) of the commanded angle, and @3 equal to P2200 (SP-40).
+//State H (high acceleration): only joint-space moves since boot, so your $120-$122 = 50 applies.
+//WARNING (calculated, UNVERIFIED): a 45 deg move here peaks near 420 deg/s, about 34 k steps/s. That is above
+//the ~30 kHz the original's stepper ISR is rated for (SP-40). Expect fast, possibly rough moves.
+
+//1. Identity and starting state (read-only)
+#1 P2203
+#2 P2400
+#3 P2244
+#4 P2243
+#5 P2200
+//CHECK NOW: #5 must read about B90 L46 R66 (within 5 deg). If not, CUT THE POWER within 10 s.
+//wait 10
+
+//2. M17: re-read the encoders, zero the tally. Then the tally must equal the encoders.
+#10 M17
+//wait 1
+#11 P2243
+#12 P2200
+#13 M2120 V0.1
+//wait 0.25
+#14 M2121
+//wait 0.5
+
+//3. Approach the test pose at F100: L up first (lifts and retracts), then R down (lifts, extends)
+//L to 70
+#20 G2202 N1 V70 F100
+//wait 4
+#21 P2243
+#22 P2200
+#23 M2120 V0.1
+//wait 0.25
+#24 M2121
+//wait 0.5
+//R to 40
+#30 G2202 N2 V40 F100
+//wait 4
+#31 P2243
+#32 P2200
+#33 M2120 V0.1
+//wait 0.25
+#34 M2121
+//wait 0.5
+//Base to 90
+#40 G2202 N0 V90 F100
+//wait 3
+#41 P2243
+#42 P2200
+#43 M2120 V0.1
+//wait 0.25
+#44 M2121
+//wait 0.5
+
+//4. Test moves at F1000, 45 deg each way, ending back at the test pose
+//Base +45 (to 135)
+#50 G2202 N0 V135 F1000
+//wait 3
+#51 P2243
+#52 P2200
+#53 M2120 V0.1
+//wait 0.25
+#54 M2121
+//wait 0.5
+//Base -45 (to 90)
+#60 G2202 N0 V90 F1000
+//wait 3
+#61 P2243
+#62 P2200
+#63 M2120 V0.1
+//wait 0.25
+#64 M2121
+//wait 0.5
+//Base -45 (to 45)
+#70 G2202 N0 V45 F1000
+//wait 3
+#71 P2243
+#72 P2200
+#73 M2120 V0.1
+//wait 0.25
+#74 M2121
+//wait 0.5
+//Base +45 (to 90)
+#80 G2202 N0 V90 F1000
+//wait 3
+#81 P2243
+#82 P2200
+#83 M2120 V0.1
+//wait 0.25
+#84 M2121
+//wait 0.5
+//L +45 (to 115)
+#90 G2202 N1 V115 F1000
+//wait 3
+#91 P2243
+#92 P2200
+#93 M2120 V0.1
+//wait 0.25
+#94 M2121
+//wait 0.5
+//L -45 (to 70)
+#100 G2202 N1 V70 F1000
+//wait 3
+#101 P2243
+#102 P2200
+#103 M2120 V0.1
+//wait 0.25
+#104 M2121
+//wait 0.5
+//R -45 (to -5)
+#110 G2202 N2 V-5 F1000
+//wait 3
+#111 P2243
+#112 P2200
+#113 M2120 V0.1
+//wait 0.25
+#114 M2121
+//wait 0.5
+//R +45 (to 40)
+#120 G2202 N2 V40 F1000
+//wait 3
+#121 P2243
+#122 P2200
+#123 M2120 V0.1
+//wait 0.25
+#124 M2121
+//wait 0.5
+
+//5. Back to the start pose at F100: R up first, then L down
+//R to 66
+#130 G2202 N2 V66 F100
+//wait 4
+#131 P2243
+#132 P2200
+#133 M2120 V0.1
+//wait 0.25
+#134 M2121
+//wait 0.5
+//L to 46
+#140 G2202 N1 V46 F100
+//wait 4
+#141 P2243
+#142 P2200
+#143 M2120 V0.1
+//wait 0.25
+#144 M2121
+//wait 0.5
+
+//End. Save the log; send it to me as before.

@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: MIT
+# The @3 position report.
+# The first seven fields are the original's (measured on your arm, probe section D). They come from the step tally;
+# after boot the tally equals the encoder pose.
+# Appended (Q-1, Q-33), format PROPOSED: M<j><angle> = one measured joint per report, in rotation B, L, R
+# (same frame as the tally field: B in the -90 frame); A<ms> = age of that measurement; T<ms> = time since boot;
+# S<n> = report counter since boot, 0-65535, wrapping.
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+#: faithful uarm_protocol.c:535-547
+> #30 M2120 V0.2
+< $30 ok
+
+#: measured probe-20261017 #30 (first seven fields)
+#: faithful uarm_peripheral.c:210-244
+#: new Q-1 Q-33 (appended fields, format proposed)
+~ ms 1100
+<re ^@3 X233\.6009 Y-0\.3583 Z-10\.6346 R89\.1000 B-0\.0879 L45\.6789 AR66\.0411 MB-0\.0879 A[0-9]+ T[0-9]+ S0$
+<re ^@3 X233\.6009 Y-0\.3583 Z-10\.6346 R89\.1000 B-0\.0879 L45\.6789 AR66\.0411 ML45\.6789 A[0-9]+ T[0-9]+ S1$
+<re ^@3 X233\.6009 Y-0\.3583 Z-10\.6346 R89\.1000 B-0\.0879 L45\.6789 AR66\.0411 MR66\.0411 A[0-9]+ T[0-9]+ S2$
+<re ^@3 X233\.6009 Y-0\.3583 Z-10\.6346 R89\.1000 B-0\.0879 L45\.6789 AR66\.0411 MB-0\.0879 A[0-9]+ T[0-9]+ S3$
+<re ^@3 X233\.6009 Y-0\.3583 Z-10\.6346 R89\.1000 B-0\.0879 L45\.6789 AR66\.0411 ML45\.6789 A[0-9]+ T[0-9]+ S4$
+
+# A period below the measured minimum is refused (Q-47). 0.1 ms is below any possible minimum.
+#: change SP-46 Q-47
+> #32 M2120 V0.0001
+< $32 E21
+
+#: measured probe-20261017 #31
+#: faithful uarm_protocol.c:1150-1152
+> #31 M2121
+< $31 ok
+~ ms 1000
+
+# V0 stops the report too (faithful uarm_peripheral.c:301-305: a period <= 0 stops).
+#: faithful uarm_peripheral.c:301-305
+> #33 M2120 V0.2
+< $33 ok
+> #34 M2120 V0
+< $34 ok
+~ ms 1000
+
+# A joint whose encoder doesn't answer shows "M<j>-" and no age (Q-45). The rotation and S continue from before.
+#: new Q-1 Q-33 Q-45
+= enc.nack BLR
+> #35 M2120 V0.2
+< $35 ok
+~ ms 250
+<re ^@3 X233\.6009 Y-0\.3583 Z-10\.6346 R89\.1000 B-0\.0879 L45\.6789 AR66\.0411 M[BLR]- T[0-9]+ S[0-9]+$
+> #36 M2121
+< $36 ok

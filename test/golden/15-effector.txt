@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: MIT
+# Wrist, pump, gripper, laser, buzzer and the board events.
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# The wrist: 0-180 (SP-23); the angle reported is the one output, to 0.5 us of pulse (Q-12; the original reported the
+# request and output it in 1.76 deg steps).
+#: faithful uarm_peripheral.c:17-33 (pulse = (180 - V) / 180 * 2 ms + 0.5 ms)
+#: change Q-12
+> #1 G2202 N3 V45 F100
+< $1 ok
+> #2 P2206 N3
+< $2 ok V45.0000
+> #3 G2202 N3 V90.04 F100
+< $3 ok
+> #4 P2206 N3
+< $4 ok V90.0000
+#: change SP-23 Q-41
+> #5 G2202 N3 V200
+< $5 E21
+
+# Release really stops the wrist's pulses (Q-7); M2203 N3 follows it.
+#: change SP-08 Q-7
+> #6 M2202 N3
+< $6 ok
+> #7 M2203 N3
+< $7 ok V0
+> #8 M2201 N3
+< $8 ok
+> #9 M2203 N3
+< $9 ok V1
+
+# Pump: P2231 is 0 off, 1 on and free, 2 holding (ADC A9 < 10, <= 70, above).
+#: faithful uarm_peripheral.c:767-777
+> #10 M2231 V1
+< $10 ok
+> #11 P2231
+< $11 ok V0
+= pump.adc 50
+> #12 P2231
+< $12 ok V2
+= pump.adc 500
+> #13 P2231
+< $13 ok V1
+> #14 M2231 V0
+< $14 ok
+> #15 P2231
+< $15 ok V0
+
+# Gripper: P2232 is 0 released, 1 caught (PA0 high), 2 holding (PA0 low).
+#: faithful uarm_peripheral.c:784-804
+> #16 M2232 V1
+< $16 ok
+> #17 P2232
+< $17 ok V1
+= gripper.pa0 0
+> #18 P2232
+< $18 ok V2
+> #19 M2232 V0
+< $19 ok
+> #20 P2232
+< $20 ok V0
+
+# Laser.
+#: faithful uarm_peripheral.c:808-830
+> #21 M2233 V1
+< $21 ok
+> #22 P2235
+< $22 ok V1
+
+# The limit switch: @6 once it has been stable for 10 ms (SP-17: without blocking); P2233.
+#: faithful uarm_protocol.c:192-201
+#: change SP-17 Q-41
+= limit 1
+~ ms 20
+< @6 N0 V1
+> #23 P2233
+< $23 ok V1
+= limit 0
+~ ms 3
+= limit 1
+~ ms 3
+= limit 0
+~ ms 20
+< @6 N0 V0
+
+# Motor power: @5 on change; P2234.
+#: faithful uarm_protocol.c:203-214
+= power 0
+~ ms 20
+< @5 V0
+> #24 P2234
+< $24 ok V0
+= power 1
+~ ms 20
+< @5 V1
+
+# Buzzer: F in Hz, T in ms (SP-24); like the original, the reply waits until the tone ends.
+#: change SP-24 Q-41
+#: faithful uarm_protocol.c:148, 175
+> #25 M2210 F1000 T100
+~ ms 90
+~ ms 15
+< $25 ok
+> #26 M2210 F10 T100
+< $26 E21

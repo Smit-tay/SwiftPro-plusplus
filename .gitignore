@@ -1,0 +1,21 @@
+# Build output and generated files
+build/
+compile_commands.json
+
+# Firmware images and flash dumps: build them, never commit them (a dump also holds the bootloader)
+*.hex
+*.bin
+*.elf
+
+# Serial logs written by tools/bringup/run.sh and tools/probe/probe-send.sh while testing
+tools/bringup/*.log
+tools/probe/*.log
+
+# Editors and IDEs
+.kdev4/
+*.kdev4
+.vscode/
+.idea/
+*~
+.~lock.*#
+.vs/

@@ -1,0 +1,75 @@
+//SwiftPro++ bring-up, stage 2: SLOW SINGLE-JOINT MOVES. *** THIS FILE MOVES THE ARM. ***
+//Clear a 300 mm radius around the base and keep a hand on the power switch.
+//PRECONDITION: power-cycled; the arm in the probe pose, P2200 about B90 L46 R66 (as tools/acceptance).
+//Every move below is small and slow (F20 = about 27 deg/s) and keeps the effector at or above its starting height
+//(the same directions as tools/acceptance: L up, R down, base either way).
+//After each move: P2200 = encoders, then two @3 = the tally. Pass: P2200 within 0.1 deg of the target, @3 equal.
+
+#1 P2200
+//CHECK NOW: about B90 L46 R66. If not, CUT THE POWER within 10 s.
+//wait 10
+
+//1. Base +5 deg and back
+#10 G2202 N0 V95 F20
+//wait 2
+#11 P2200
+#12 M2120 V0.2
+//wait 0.5
+#13 M2121
+#14 G2202 N0 V90 F20
+//wait 2
+#15 P2200
+
+//2. L up 10 deg (lifts and retracts) and back
+#20 G2202 N1 V56 F20
+//wait 2
+#21 P2200
+#22 M2120 V0.2
+//wait 0.5
+#23 M2121
+#24 G2202 N1 V46 F20
+//wait 2
+#25 P2200
+
+//3. R down 10 deg (lifts and extends) and back
+#30 G2202 N2 V56 F20
+//wait 2
+#31 P2200
+#32 M2120 V0.2
+//wait 0.5
+#33 M2121
+#34 G2202 N2 V66 F20
+//wait 2
+#35 P2200
+
+//4. The same, faster (F100 = about 133 deg/s), base only
+#40 G2202 N0 V110 F100
+//wait 2
+#41 P2200
+#42 G2202 N0 V90 F100
+//wait 2
+#43 P2200
+
+//5. Feed hold and resume during a slow base move (40 deg, about 1.6 s; probe-send already waits PROBE_DELAY,
+//0.4 s, after each line, so the hold comes about 0.4 s in)
+#50 G2202 N0 V130 F20
+#51 S1000 V0
+//wait 1
+#52 M2200
+#53 S1000 V1
+//wait 2
+#54 P2200
+#55 G2202 N0 V110 F20
+//wait 1.5
+
+//6. Stop during a slow base move: expect "ok" at once, then "$60 E25"; the tally must still equal the encoders
+#60 G2202 N0 V70 F20
+#61 S1100
+//wait 1
+#62 P2200
+#63 M2120 V0.2
+//wait 0.5
+#64 M2121
+#65 G2202 N0 V90 F20
+//wait 3
+#66 P2200

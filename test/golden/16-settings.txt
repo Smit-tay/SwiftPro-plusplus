@@ -1,0 +1,186 @@
+# SPDX-License-Identifier: MIT
+# Module 5c: pin commands, work modes and offsets, the encoder reference, the UID, the stepper end effector.
+# Pose as the other traces: P2220 = X233.6009 Y-0.3583 Z-10.6346 in mode 0 (front 56.65, height 74.55).
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# Pins: Arduino numbers (framework-arduino-avr 5.2.0, variants/mega). 23 = PA1, 24 = PA2.
+#: faithful uarm_protocol.c:932-966, 1482-1494
+> #1 M2241 N23 V1
+< $1 ok
+> #2 M2240 N23 V1
+< $2 ok
+> #3 P2240 N23
+< $3 ok V1
+> #4 M2240 N23 V0
+< $4 ok
+> #5 P2240 N23
+< $5 ok V0
+> #6 M2241 N24 V0
+< $6 ok
+= pin.A2 1
+> #7 P2240 N24
+< $7 ok V1
+
+# Pins the firmware drives are refused (Q-17): 54 = PF0 (base STEP), 0 = USART0 RX, 6 = PH3 (wrist), 44 = PL5 (buzzer).
+# Reads are allowed everywhere. Out of range or malformed: E21.
+#: change SP-32 Q-17
+> #8 M2240 N54 V1
+< $8 E21
+> #9 M2241 N0 V1
+< $9 E21
+> #10 M2240 N6 V0
+< $10 E21
+> #11 M2241 N44 V1
+< $11 E21
+> #12 P2240 N54
+< $12 ok V0
+> #13 M2240 N70 V1
+< $13 E21
+> #14 M2240 N23 V2
+< $14 E21
+> #15 P2240 N70
+< $15 E21
+
+# Work modes: the mode's default offsets (uarm_common.h:116-138), saved (uarm_protocol.c:968-1031).
+# Mode 1: front 64.4 (+7.75 on X), height 51.04 (+23.51 on Z).
+#: faithful uarm_protocol.c:968-1031
+> #16 M2400 S1
+< $16 ok
+> #17 P2400
+< $17 ok V1
+> #18 P2220
+< $18 ok X241.3509 Y-0.3702 Z12.8754
+> #19 M2400 S9
+< $19 E21
+
+# Saved: after a reboot the mode and its offsets are back.
+~ boot
+#: faithful uarm_peripheral.c:327-372
+< device name : SwiftPro\r
+< soft ver : V5.0.0-pp.1\r
+< api ver : V4.0.5\r
+< work mode : 1\r
+< @1
+~ ms 500
+< @5 V1
+> #20 P2220
+< $20 ok X241.3509 Y-0.3702 Z12.8754
+
+# Offsets: M2413 H (height), M2411 S (front), saved also as the user offsets that mode 7 loads.
+#: faithful uarm_protocol.c:1060-1076, 1095-1110
+> #21 M2413 H70
+< $21 ok
+> #22 M2411 S50
+< $22 ok
+> #23 P2220
+< $23 ok X226.9509 Y-0.3481 Z-6.0846
+> #24 M2400 S0
+< $24 ok
+> #25 M2400 S7
+< $25 ok
+> #26 P2220
+< $26 ok X226.9509 Y-0.3481 Z-6.0846
+#: change Q-53 R-7
+> #27 M2413 H
+< $27 E21
+> #28 M2411 S5000
+< $28 E21
+
+# M2410: the height offset becomes the arm's current Z, so the effector reads Z = 0 here.
+#: faithful uarm_protocol.c:1039-1058
+> #29 M2410
+< $29 ok
+> #30 P2220
+< $30 ok X226.9509 Y-0.3481 Z0.0000
+
+# M2401: the current raw counts become the reference (EEPROM 818/820), so every joint now reads its "point B" angle
+# (L 32.7589, R 88.9805, B 90; uarm_angle.c:36-38), and the tally follows (SP-59).
+#: faithful uarm_angle.c:273-279
+> #31 M2401
+< $31 ok
+> #32 P2242
+< $32 ok B1654 L2820 R1403
+> #33 P2200
+< $33 ok B90.0000 L32.7589 R88.9805
+#: change SP-59 Q-65
+> #34 P2206 N1
+< $34 ok V32.7589
+> #35 G2202 N1 V40 F200
+~ idle
+< $35 ok
+
+# M2205: the UID, 1-12 characters of any kind after "VUB" (SP-56, Q-62; the original took only [0-9.]).
+#: faithful uarm_protocol.c:689-700
+> #36 M2205 VUB123456789012
+< $36 ok
+> #37 P2205
+< $37 ok V123456789012
+#: change SP-56 Q-62
+> #38 M2205 VUBA1B2C3D4E5F6
+< $38 ok
+> #39 P2205
+< $39 ok VA1B2C3D4E5F6
+> #56 M2205 VUBab-1
+< $56 ok
+> #57 P2205
+< $57 ok VAB-1
+> #40 M2205 VUB1234567890123
+< $40 E21
+> #41 M2205 V12
+< $41 E21
+
+# The stepper end effector (modes 4/5, untested on hardware). M2400 S4 starts the origin search; its reply comes when
+# the search and the move to 90 deg are done. The switch closes after 0.5 s of searching.
+#: faithful uarm_protocol.c:993-1000 uarm_peripheral.c:143-168
+> #42 M2400 S4
+~ ms 500
+= tool.switch 1
+~ ms 20
+= tool.switch 0
+~ idle
+< $42 ok
+> #43 P2206 N3
+< $43 ok V90.0000
+#: faithful uarm_protocol.c:303-309
+> #44 G2202 N3 V180
+~ idle
+< $44 ok
+> #45 P2206 N3
+< $45 ok V180.0000
+#: change SP-23
+> #46 G2202 N3 V400
+< $46 E21
+
+# In modes 4/5 the laser's pins are the stepper's (SP-61), and @3 R is the effector's angle.
+#: change SP-61 Q-67 Q-68
+> #47 M2233 V1
+< $47 E20
+> #48 M2120 V0.1
+< $48 ok
+~ ms 110
+<re ^@3 X[-0-9.]+ Y[-0-9.]+ Z[-0-9.]+ R180\.0000 B.*$
+> #49 M2121
+< $49 ok
+
+# A search that never finds the switch: E26, and the effector refuses moves until a search succeeds (SP-60).
+#: change SP-60 Q-66
+> #50 M2412 V5
+~ ms 12000
+< $50 E26
+> #51 G2202 N3 V90
+< $51 E26
+
+# Back to mode 0: the stepper stops and the wrist servo is attached again (SP-57).
+#: change SP-57 Q-63
+> #52 M2400 S0
+< $52 ok
+> #53 M2203 N3
+< $53 ok V1
+> #54 G2202 N3 V45
+< $54 ok
+> #55 P2206 N3
+< $55 ok V45.0000

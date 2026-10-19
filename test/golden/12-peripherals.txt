@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MIT
+# Peripheral and lock-state queries with the arm at rest. Values were measured on your arm (2026-10-17).
+
+= hw V3.3.1
+= mode 0
+= power 1
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+#: measured probe-20261017 #10
+#: faithful uarm_protocol.c:1474-1476 (ADC A5 > 100)
+> #10 P2234
+< $10 ok V1
+
+#: measured probe-20261017 #16
+#: faithful uarm_protocol.c:1462-1464, uarm_peripheral.c:767-777 (pump off -> 0)
+> #16 P2231
+< $16 ok V0
+
+#: measured probe-20261017 #17
+#: faithful uarm_protocol.c:1466-1468, uarm_peripheral.c:794-804 (released -> 0)
+> #17 P2232
+< $17 ok V0
+
+#: measured probe-20261017 #18
+#: faithful uarm_protocol.c:1470-1472, uarm_peripheral.c:834-840
+> #18 P2233
+< $18 ok V0
+
+# M commands are sync; the arm is idle, so the reply comes at once.
+#: measured probe-20261017 #19-#22
+#: faithful uarm_protocol.c:656-687 (all four locked after boot)
+> #19 M2203 N0
+< $19 ok V1
+> #20 M2203 N1
+< $20 ok V1
+> #21 M2203 N2
+< $21 ok V1
+> #22 M2203 N3
+< $22 ok V1
+
+# P2206 N3 is the commanded wrist angle, 89.1 after init (docs/PROTOCOL.md section 7).
+#: faithful uarm_protocol.c:1391-1417 (P2206)
+> #27 P2206 N3
+< $27 ok V89.1000

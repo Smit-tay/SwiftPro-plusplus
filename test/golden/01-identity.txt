@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: MIT
+# Identity and mode queries. P commands are async: the reply comes in the same main-loop pass.
+# State: your arm as probed on 2026-10-17.
+
+= hw V3.3.1
+= uid A1B2C3D4E5F6
+= mode 0
+~ boot quiet
+
+#: measured probe-20261017 #1
+#: faithful uarm_protocol.c:1370-1372
+> #1 P2201
+< $1 ok VSwiftPro
+
+#: measured probe-20261017 #2
+#: faithful uarm_protocol.c:1374-1376, uarm_peripheral.c:629-650
+> #2 P2202
+< $2 ok V3.3.1
+
+#: change Q-2 (V4.9.1-jss.7 becomes V5.0.0-pp.1)
+> #3 P2203
+< $3 ok V5.0.0-pp.1
+
+#: measured probe-20261017 #4
+#: faithful uarm_protocol.c:1382-1384
+> #4 P2204
+< $4 ok V4.0.5
+
+#: measured probe-20261017 #5
+#: faithful uarm_protocol.c:1386-1388
+> #5 P2205
+< $5 ok VA1B2C3D4E5F6
+
+#: measured probe-20261017 #6
+#: faithful uarm_protocol.c:1566-1568
+> #6 P2400
+< $6 ok V0
+
+# Without a sequence number the reply has no "$N" and no leading space.
+#: faithful uarm_protocol.c:74-132 (add_result_to_report)
+> P2201
+< ok VSwiftPro
+
+# The straps are read once, at boot (uarm_swift.c:11); changing them later doesn't change P2202.
+= hw V3.3.0
+#: faithful uarm_swift.c:11, uarm_peripheral.c:629-650, uarm_protocol.c:1374-1376
+> #7 P2202
+< $7 ok V3.3.1
+
+# No UID stored (erased EEPROM): "ok V" with nothing after it (Q-58; the original printed 12 bytes of 0xFF).
+= uid none
+~ boot quiet
+#: change Q-58
+> #8 P2205
+< $8 ok V

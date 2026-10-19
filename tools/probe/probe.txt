@@ -1,0 +1,69 @@
+//SwiftPro probe for the ORIGINAL firmware (V4.9.1-jss.7). Nothing here moves the arm.
+//Each line was checked against the original source: read-only, or rejected by the parser before any motion code runs.
+
+//A. Identity
+#1 P2201
+#2 P2202
+#3 P2203
+#4 P2204
+#5 P2205
+#6 P2400
+
+//B. State and health (read-only)
+#10 P2234
+#11 P2244
+#12 P2242
+#13 P2243
+#14 P2200
+#15 P2220
+#16 P2231
+#17 P2232
+#18 P2233
+#19 M2203 N0
+#20 M2203 N1
+#21 M2203 N2
+#22 M2203 N3
+#23 M2200
+
+//C. Stored Grbl state. $N = startup lines (run only after $H in this firmware); $# = stored G28/G30 targets
+$N
+$#
+$G
+$I
+
+//D. @3 report format (2 s of reports, then stop)
+#30 M2120 V0.2
+//wait 2
+#31 M2121
+//wait 0.5
+
+//E. Error paths (parse fails before motion). Expected per docs/PROTOCOL.md
+//E1 SP-10: expect "$40 ok" and NO movement
+#40 G2202 N1 V- F100
+//E2 SP-12: expect "$41 ok"
+#41 P9999
+//E3 SP-11: expect "$42" alone
+#42 G0 X
+//E4 expect "$43 E20"
+#43 M9999
+//E5 expect "$44 E21"
+#44 G2202 N9 V0 F100
+//E6 SP-13: 80+ char line, expect "error: E23" and no "$45" reply
+#45P2201000000000000000000000000000000000000000000000000000000000000000000000000000000
+
+//F. Q-9 external pull-up on the L encoder SDA line (PC1 = Arduino pin 36)
+//F: drive SDA low, then make it an input without internal pull-up and read it at once.
+//F: "$53 ok V1" = external pull-up present. "$53 ok V0" = no external pull-up.
+#50 M2241 N36 V1
+#51 M2240 N36 V0
+//wait 0.5
+//burst
+#52 M2241 N36 V0
+#53 P2240 N36
+//wait 0.5
+#54 P2240 N36
+//F: the encoder driver re-drives SDA on its next read; these confirm the L encoder still works
+#55 P2244
+#56 P2200
+
+//End: power-cycle the arm before using it normally.

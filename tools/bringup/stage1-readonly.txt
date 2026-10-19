@@ -1,0 +1,52 @@
+//SwiftPro++ bring-up, stage 1: READ-ONLY. Nothing here moves a joint. (The wrist servo holds its boot position,
+//89.1 deg, as with the original firmware.) Run after a power-cycle, with tools/probe/probe-send.sh.
+//Expected replies are in docs/HARDWARE-TEST.md, stage 1.
+
+//A. Identity
+#1 P2201
+#2 P2202
+#3 P2203
+#4 P2204
+#5 P2205
+#6 P2400
+
+//B. Power, encoders (bit-banged I2C on the real buses)
+#10 P2234
+#11 P2244
+#12 P2246
+#13 P2242
+#14 P2243
+#15 P2200
+#16 P2220
+#17 M2203 N0
+#18 M2203 N1
+#19 M2203 N2
+
+//C. The tally must equal the encoders: @3's B L AR against P2200 (B in the -90 frame in @3)
+#20 M2120 V0.2
+//wait 1.1
+#21 M2121
+//wait 0.5
+
+//D. Report rate: 100 Hz for 2 s. Count the @3 lines and look for gaps in S
+#30 M2120 V0.01
+//wait 2
+#31 M2121
+//wait 0.5
+
+//E. Parser and error codes (none of these can move anything)
+#40 G2202 N1 V500 F100
+#41 G0 X500 Y0 Z0 F100
+#42 P9999
+#43 M2240 N54 V1
+#44 G2202.5 N1 V60
+#45 P2206 N9
+
+//F. Peripherals that don't move the arm: limit switch, buzzer, buttons
+#50 P2233
+#51 M2210 F1000 T200
+//wait 0.5
+#52 M2213 V0
+//PRESS AND RELEASE the Menu button, then hold Play for 2 s: expect "@4 N0 V1" then "@4 N1 V2"
+//wait 8
+#53 M2213 V1

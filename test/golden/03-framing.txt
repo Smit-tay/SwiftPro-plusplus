@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: MIT
+# Line assembly and routing.
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# Every character <= ' ' is discarded, lower case is folded, comments are removed (protocol.c:80-129).
+#: faithful protocol.c:80-129, uarm_protocol.c:23-71
+> #1 P 2 2 0 1
+< $1 ok VSwiftPro
+> #2 p2201
+< $2 ok VSwiftPro
+> #3 P2201 ;trailing comment
+< $3 ok VSwiftPro
+> #4 P22(inline comment)01
+< $4 ok VSwiftPro
+
+# A line also ends at CR. "\r\n" is a line followed by an empty line, which produces nothing.
+#: faithful protocol.c:80-129
+>raw #5 P2201\r\n
+< $5 ok VSwiftPro
+>raw #6 P2201\r
+< $6 ok VSwiftPro
+
+# A line that starts with anything other than $, #, G, M, P or S is ignored, with no reply.
+#: faithful uarm_protocol.c:39-41
+> Q2201
+> 12345
+
+# Q-15: the Grbl realtime bytes ? ! ~ @ are discarded wherever they appear, with no action and no output.
+# (The original removes them too, but acts on them, e.g. "?" prints a Grbl status line.)
+#: change SP-30 Q-15
+>raw ?
+>raw #7 P22!01\n
+< $7 ok VSwiftPro
+
+# Q-22: a line longer than 48 characters (counted after the spaces are removed) is rejected with E21.
+# 48 characters: accepted. M2221 with the joint angles your arm reported in the probe (P2200 #14) gives the
+# position the arm reported for them (P2220 #15).
+#: change Q-22
+#: measured probe-20261017 #15 (same angles)
+> #123456789 M2221 B89.9121090 L45.6788520 R66.0410840
+< $123456789 ok X233.6009 Y-0.3583 Z-10.6346
+
+# 49 characters: rejected.
+#: change Q-22
+> #123456789 M2221 B89.9121090 L45.6788520 R66.04108400
+< $123456789 E21
+
+# Much longer than 48: still E21 with $N (Q-22). The original prints "error: E23" here (measured: probe #45) and
+# runs the rest of the line as a new line. Q-22 and SP-13 overlap; applied as: too long -> $N E21.
+#: measured probe-20261017 #45 (original: "error: E23")
+#: change Q-22 SP-13 Q-41
+> #45P2201000000000000000000000000000000000000000000000000000000000000000000000000000000
+< $45 E21
+
+# "$" lines: Grbl system commands are dropped (Q-36); they get E20 (Q-42). No sequence number is possible.
+#: change SP-30 Q-36 Q-42
+> $$
+< E20
+> $I
+< E20
+
+# After "#N", only G, M, P and S are commands (SP-52). The original would queue "X10" for Grbl and move the arm.
+#: change SP-52 Q-41
+> #11 X10
+< $11 E20
+> #12 $I
+< $12 E20
+
+# RX overflow (SP-01, Q-3): 300 bytes arrive before the main loop runs. The line that lost bytes is answered with
+# "E23" alone (its #N may be among the lost bytes) and is not executed. The original dropped the bytes silently.
+#: change SP-01 Q-3
+>raw #13P2201000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n
+< E23
+
+# The state is fine afterwards.
+#: faithful uarm_protocol.c:1370-1372
+> #10 P2201
+< $10 ok VSwiftPro

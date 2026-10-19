@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: MIT
+# S1100 stops everything (SP-05, Q-4). In the original, S1100 during motion leaves Grbl in ALARM and later sync
+# commands are never answered (SP-05); that behaviour is not reproduced.
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# Two moves (both go to the planner) and a non-motion command waiting for idle (Q-5).
+> #1 G2202 N0 V120 F200
+> #2 G2202 N0 V60 F200
+> #3 M2121
+~ ms 300
+
+# S1100 is async: "ok" at once. The joints brake to rest (Q-60); then every sync command still waiting for a reply gets
+# E25, in FIFO order. That includes #1, whose move was cut short (Q-46).
+#: change SP-05 Q-4 Q-46 Q-60
+> #4 S1100
+< $4 ok
+~ idle
+< $1 E25
+< $2 E25
+< $3 E25
+
+# After braking, the firmware's position and the encoder agree within one count: the tally stayed true (Q-60).
+#: change Q-60
+> #7 P2206 N0
+<re ^\$7 ok V(9[0-9]|1[01][0-9])\.[0-9]{4}$
+> #8 M17
+< $8 ok
+
+# Ctrl-X (0x18) acts like S1100 but has no reply of its own (Q-48).
+#: change Q-15 Q-48
+> #6 G2202 N0 V120 F200
+~ ms 300
+>raw \x18
+~ idle
+< $6 E25
+
+# The firmware is idle and accepts new commands.
+#: change SP-05 Q-4
+~ idle
+> #5 M2121
+< $5 ok

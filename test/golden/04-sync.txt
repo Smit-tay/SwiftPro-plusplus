@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: MIT
+# Sync (G/M) replies appear only when the arm is idle; async (P/S) replies come at once.
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# A move: its reply waits for the end of the motion.
+#: faithful uarm_protocol.c:167-182 (sync replies only in STATE_IDLE)
+> #1 G2202 N0 V100 F1000
+
+# A query during the move is answered at once.
+#: faithful uarm_protocol.c:135-142, 167-172 (async slot)
+> #2 P2201
+< $2 ok VSwiftPro
+
+# Q-5: a non-motion sync command waits for motion idle before it executes. Its reply comes after #1's.
+#: change SP-06 Q-5
+> #3 M2122 V1
+
+#: faithful uarm_protocol.c:167-182 (FIFO order)
+~ idle
+< $1 ok
+< $3 ok
+
+# With M2122 V1, "@9 V0" follows the reply of the move that just ended.
+#: faithful uarm_protocol.c:216-221
+> #4 G2202 N0 V90 F1000
+~ idle
+< $4 ok
+< @9 V0
+
+# M2200 ("is moving?") is answered at once, even during a move (Q-56; the original answered only at idle).
+#: change Q-56
+> #5 G2202 N0 V100 F1000
+> #6 M2200
+< $6 ok V1
+~ idle
+< $5 ok
+< @9 V0
+
+# Sync queue: 20 commands may wait for a reply. The next one is refused.
+# SP-53: count commands waiting for a reply, not only commands waiting to execute.
+# SP-13: the refusal carries $N (the original prints "E23 buffer full\r\n" without $N).
+> #10 G2202 N0 V80 F100
+> #11 M2121
+> #12 M2121
+> #13 M2121
+> #14 M2121
+> #15 M2121
+> #16 M2121
+> #17 M2121
+> #18 M2121
+> #19 M2121
+> #20 M2121
+> #21 M2121
+> #22 M2121
+> #23 M2121
+> #24 M2121
+> #25 M2121
+> #26 M2121
+> #27 M2121
+> #28 M2121
+> #29 M2121
+#: change SP-13 Q-41 ($N E23)
+#: change SP-53 Q-41 (count unanswered entries)
+> #30 M2121
+< $30 E23
+
+#: faithful uarm_protocol.c:167-182
+# Q-5: #11-#29 execute only after the move ends, so "@9 V0" (from #10) comes right after $10.
+#: change SP-06 Q-5
+~ idle
+< $10 ok
+< @9 V0
+< $11 ok
+< $12 ok
+< $13 ok
+< $14 ok
+< $15 ok
+< $16 ok
+< $17 ok
+< $18 ok
+< $19 ok
+< $20 ok
+< $21 ok
+< $22 ok
+< $23 ok
+< $24 ok
+< $25 ok
+< $26 ok
+< $27 ok
+< $28 ok
+< $29 ok

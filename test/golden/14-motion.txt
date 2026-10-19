@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: MIT
+# Moves, checked through the simulated encoders (which follow the motors' real pulses).
+# Acceptance (your brief): moves land within one encoder count (0.088 deg).
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# One joint, F1000: lands within one count of 60 deg.
+#: new Q-51 Q-52 (own planner; F in the original's units)
+> #1 G2202 N1 V60 F1000
+~ idle
+< $1 ok
+> #2 P2206 N1
+<re ^\$2 ok V(59\.9[2-9]|60\.0[0-8])[0-9]*$
+
+# The base, F1000, by 30 deg.
+#: new Q-51 Q-52
+> #3 G2202 N0 V120 F1000
+~ idle
+< $3 ok
+> #4 P2206 N0
+<re ^\$4 ok V(119\.9[2-9]|120\.0[0-8])[0-9]*$
+
+# G0 to a Cartesian point (joint-space path): the encoders put the effector within 0.2 mm.
+#: new Q-51
+> #5 G0 X200 Y0 Z100 F500
+~ idle
+< $5 ok
+> #6 P2220
+<re ^\$6 ok X(199\.[89]|200\.[01])[0-9]* Y-?0\.[01][0-9]* Z(99\.[89]|100\.[01])[0-9]*$
+
+# Missing axes come from the current position (Q-54): only Z changes.
+#: change Q-54
+> #7 G0 Z150
+~ idle
+< $7 ok
+> #8 P2220
+<re ^\$8 ok X(199\.[89]|200\.[01])[0-9]* Y-?0\.[01][0-9]* Z(149\.[89]|150\.[01])[0-9]*$
+
+# A straight line (G1) and a relative move (G2204).
+#: new R-4 (line cut by path error)
+> #9 G1 X250 Y50 Z150 F200
+~ idle
+< $9 ok
+> #10 P2220
+<re ^\$10 ok X(249\.[89]|250\.[01])[0-9]* Y(49\.[89]|50\.[01])[0-9]* Z(149\.[89]|150\.[01])[0-9]*$
+> #11 G2204 X-50 Y-50 Z0 F200
+~ idle
+< $11 ok
+> #12 P2220
+<re ^\$12 ok X(199\.[89]|200\.[01])[0-9]* Y-?0\.[01][0-9]* Z(149\.[89]|150\.[01])[0-9]*$
+
+# Unreachable: E22, and nothing moves (SP-20; the original moved part of the way first).
+#: change SP-20 Q-41
+> #13 G1 X500 Y0 Z150 F200
+< $13 E22
+> #14 P2220
+<re ^\$14 ok X(199\.[89]|200\.[01])[0-9]* Y-?0\.[01][0-9]* Z(149\.[89]|150\.[01])[0-9]*$
+
+# Feed hold stops the move; resume finishes it.
+#: faithful uarm_protocol.c:440-450 (S1000)
+> #15 G2202 N0 V60 F200
+~ ms 200
+> #16 S1000 V0
+< $16 ok
+~ ms 1000
+> #17 M2200
+< $17 ok V1
+> #18 S1000 V1
+< $18 ok
+~ idle
+< $15 ok
+> #19 P2206 N0
+<re ^\$19 ok V(59\.9[2-9]|60\.0[0-8])[0-9]*$

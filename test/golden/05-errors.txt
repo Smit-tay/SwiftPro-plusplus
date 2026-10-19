@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: MIT
+# Error replies. Lines marked "pending" show the original's reply until you decide the SP item.
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# Unknown M command.
+#: measured probe-20261017 #43
+#: faithful uarm_protocol.c:74-132 (status 20 -> E20)
+> #43 M9999
+< $43 E20
+
+# Parameter out of range.
+#: measured probe-20261017 #44
+#: faithful uarm_protocol.c:74-132 (UARM_CMD_ERROR -> E21)
+> #44 G2202 N9 V0 F100
+< $44 E21
+
+# A malformed number in a G22xx command replies "ok" and does not move.
+#: measured probe-20261017 #40
+#: change SP-10 Q-41 (the original replies "ok")
+> #40 G2202 N1 V- F100
+< $40 E21
+
+# An unknown P command replies "ok".
+#: measured probe-20261017 #41
+#: change SP-12 Q-41 (the original replies "ok")
+> #41 P9999
+< $41 E20
+> #51 S9999
+< $51 E20
+
+# "G0 X": X has no number, so E21 (SP-11; the original replied "$42" with no code). Axes that are missing
+# altogether are taken from the current position (Q-54).
+#: measured probe-20261017 #42 (original: "$42")
+#: change SP-11 Q-41
+> #42 G0 X
+< $42 E21
+
+# F must be positive (SP-09). The original turns F0 into a crawl and negative F into a rapid.
+#: change SP-09 Q-41
+> #47 G2202 N0 V90 F0
+< $47 E21
+> #48 G2202 N0 V90 F-100
+< $48 E21
+
+# Wrist angle outside 0-180 (SP-23). The original wraps it to the opposite end stop and replies "ok".
+#: change SP-23 Q-41
+> #49 G2202 N3 V200 F100
+< $49 E21
+
+# M204 with A <= 0 (SP-37). The original replies "ok" and ignores it.
+#: change SP-37 Q-41
+> #50 M204 A0
+< $50 E21
+
+# A fractional command number, and extra characters after the parameters, are refused (Q-53).
+#: change Q-53
+> #52 G2202.5 N0 V90 F100
+< $52 E21
+> #53 P2201 X
+< $53 E21
+> #54 M2122 V1 X
+< $54 E21
+
+# P2206 accepts N0-N3 only.
+#: faithful uarm_protocol.c:1598-1603
+> #45 P2206 N4
+< $45 E21
+
+# M2203 accepts N0-N3 only.
+#: faithful uarm_protocol.c:1179-1183
+> #46 M2203 N7
+< $46 E21
