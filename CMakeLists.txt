@@ -29,9 +29,25 @@ set(MODULES
     src/line.cpp src/parse.cpp src/serial.cpp src/fmt.cpp src/tick.cpp src/nvm.cpp src/board.cpp
     src/commands.cpp src/protocol.cpp src/app.cpp src/kin.cpp src/encoder.cpp
     src/planner.cpp src/stepgen.cpp src/stepper.cpp src/motion.cpp src/adc.cpp src/effector.cpp src/buzzer.cpp
-    src/report.cpp src/pins.cpp src/tool.cpp src/xeeprom.cpp)
+    src/report.cpp src/pins.cpp src/tool.cpp src/xeeprom.cpp src/build_info.cpp)
 
 set(WARNINGS -Wall -Wextra -Wconversion -Wdouble-promotion -Werror)
+
+# Build stamp (R-18): build/<dir>/generated/build_stamp.h, rewritten on every build with the UTC time and the git
+# commit ("-dirty" if the tree has uncommitted changes). The firmware reports it with P2210. The host build uses a
+# fixed stamp so the golden traces don't change from build to build.
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "avr")
+    set(SPP_BUILD_FIXED "" CACHE STRING "Fixed build stamp text instead of time and commit (empty: time and commit)")
+else()
+    set(SPP_BUILD_FIXED "host" CACHE STRING "Fixed build stamp text instead of time and commit (empty: time and commit)")
+endif()
+set(BUILD_STAMP_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+add_custom_target(build_info
+    COMMAND ${CMAKE_COMMAND} -DOUT=${BUILD_STAMP_DIR}/build_stamp.h -DSRC=${CMAKE_CURRENT_SOURCE_DIR}
+            -DFIXED=${SPP_BUILD_FIXED} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_info.cmake
+    BYPRODUCTS ${BUILD_STAMP_DIR}/build_stamp.h
+    COMMENT "Build stamp"
+    VERBATIM)
 
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "avr")
     # ---------------------------------------------------------------- firmware
@@ -44,6 +60,8 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL "avr")
     target_compile_options(swiftpro-pp PRIVATE ${AVR_FLAGS} ${WARNINGS})
     target_link_options(swiftpro-pp PRIVATE -mmcu=${AVR_MCU} -Os -flto -Wl,--gc-sections)
     target_link_libraries(swiftpro-pp PRIVATE m)
+    target_include_directories(swiftpro-pp PRIVATE ${BUILD_STAMP_DIR})
+    add_dependencies(swiftpro-pp build_info)
 
     set(ELF $<TARGET_FILE:swiftpro-pp>)
     set(OUT ${CMAKE_CURRENT_BINARY_DIR}/swiftpro-pp)
@@ -60,6 +78,8 @@ else()
     set(HOST_FLAGS -O1 -g)
     add_library(firmware_host STATIC ${MODULES} test/sim.cpp)
     target_compile_options(firmware_host PRIVATE ${HOST_FLAGS} ${WARNINGS})
+    target_include_directories(firmware_host PRIVATE ${BUILD_STAMP_DIR})
+    add_dependencies(firmware_host build_info)
 
     add_executable(unit
         test/unit.cpp test/unit_line.cpp test/unit_parse.cpp test/unit_serial.cpp test/unit_fmt.cpp

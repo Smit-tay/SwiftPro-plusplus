@@ -36,6 +36,12 @@
 > #6 P2400
 < $6 ok V0
 
+# Build stamp: when and from which commit the firmware was built. The host build always reports "SPP-host";
+# a firmware build reports e.g. "SPP-20261102T143012Z-cf72a17" ("-dirty" if built with uncommitted changes).
+#: new R-18
+> #9 P2210
+< $9 ok VSPP-host
+
 # Without a sequence number the reply has no "$N" and no leading space.
 #: faithful uarm_protocol.c:74-132 (add_result_to_report)
 > P2201

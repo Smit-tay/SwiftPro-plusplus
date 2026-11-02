@@ -5,6 +5,7 @@
 
 #include "adc.h"
 #include "board.h"
+#include "build_info.h"
 #include "buzzer.h"
 #include "effector.h"
 #include "encoder.h"
@@ -499,6 +500,7 @@ Status query(uint16_t number, const char* p, fmt::Writer& tail) {
         case 2203: tail.put(FLASH(" V5.0.0-pp.1")); return Status::kOk;  // Q-2 (the original: V4.9.1-jss.7)
         case 2204: tail.put(FLASH(" V4.0.5")); return Status::kOk;       // uarm_swift.h:18
         case 2205: tail.put(" V"); tail.put(uid); return Status::kOk;  // :1386-1388; empty if none stored (Q-58)
+        case 2210: tail.put(" V"); tail.put(build_info::stamp()); return Status::kOk;  // build stamp (R-18)
         case 2400: tail.put(" V"); tail.u16(mode); return Status::kOk;                     // :1566-1568
         case 2242:  // reference counts, " B%d L%d R%d" (:1512-1516)
             tail.put(" B");
