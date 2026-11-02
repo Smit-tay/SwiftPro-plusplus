@@ -30,15 +30,27 @@
 ~ idle
 < $8 ok
 
-# A released joint is not checked: its encoder may be anywhere.
-#: new SP-41 Q-26
+# A released joint: every move is refused with E27, even one that doesn't turn it, and nothing is planned (Q-70, as
+# V4.10.0 motion_control.c:69). Linear moves too. Locking the joint again re-reads its encoder (Q-6).
+#: change Q-70
 > #9 M2202 N0
 < $9 ok
-= enc.stall B
 > #10 G2202 N1 V60 F1000
-~ idle
-< $10 ok
-= enc.stall none
+< $10 E27
+> #16 G2204 X10 Y0 Z0
+< $16 E27
+> #17 M2201 N0
+< $17 ok
+
+# M2124 V1/V0: beep when a re-sync after a stop corrects a joint by more than 0.5 deg (Q-72; V4.10.0's M2124). The
+# beep itself is checked in unit_watch.cpp.
+#: new Q-72
+> #18 M2124 V1
+< $18 ok
+> #19 M2124 V0
+< $19 ok
+> #20 M2124 V2
+< $20 E21
 
 # The same on R, which stalls 10 ms into the move.
 #: new SP-41 Q-26
@@ -57,6 +69,19 @@
 > #13 G2202 N1 V75 F1000
 ~ idle
 < $13 ok
+
+# The tally now says 75 while L's encoder still reads about 80. A stop re-reads the encoders once the arm is at rest
+# (Q-71), so @3's L (the tally) is back near 80.
+#: change Q-71
+> #21 S1100
+< $21 ok
+~ idle
+> #22 M2120 V1
+< $22 ok
+~ ms 1000
+<re ^@3 .* L(79\.9|80\.0)[0-9]+ AR.*$
+> #23 M2121
+< $23 ok
 = enc.stall none
 > #14 M2125 V1
 < $14 ok

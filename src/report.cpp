@@ -176,6 +176,8 @@ bool button_event(fmt::Writer& out) {
     return false;
 }
 
+bool button_down(uint8_t button) { return pressed(button); }
+
 #if !defined(__AVR__)
 void host_set_button(uint8_t button, bool on) { host_pressed[button] = on; }
 #endif

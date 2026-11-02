@@ -55,6 +55,9 @@ bool sync_discard = false;  // the sync command was aborted (S1100, Ctrl-X): dro
 char sync_tail_buf[kTailMax + 1];
 fmt::Writer sync_tail(sync_tail_buf, sizeof sync_tail_buf);
 
+// Realtime bytes acted on whose reply hasn't been sent yet, per port (serial::kRt* bits, Q-71).
+uint8_t realtime_reply[serial::kPorts] = {};
+
 uint8_t slot(uint8_t i) { return static_cast<uint8_t>((head + i) % kQueueSize); }
 
 const fmt::FlashText* code_text(Status s) {
@@ -65,6 +68,7 @@ const fmt::FlashText* code_text(Status s) {
         case Status::kE22: return FLASH("E22");
         case Status::kE25: return FLASH("E25");
         case Status::kE26: return FLASH("E26");
+        case Status::kE27: return FLASH("E27");
         case Status::kPending: break;  // never sent: a pending command has no reply yet
     }
     return FLASH("E20");
@@ -313,6 +317,38 @@ bool pump() {
     return progress;
 }
 
+// Ctrl-X, '!' and '~' (Q-71): act at once, as V4.10.0 serial.c:350-385, and queue the reply.
+bool take_realtime() {
+    bool progress = false;
+    for (uint8_t port = 0; port < serial::kPorts; ++port) {
+        const uint8_t bits = serial::take_realtime(port);
+        if (bits == 0) continue;
+        progress = true;
+        if (bits & serial::kRtStop) {  // like S1100 (Q-48)
+            commands::stop();
+            abort_all();
+        }
+        if (bits & (serial::kRtHold | serial::kRtResume)) commands::hold(serial::hold_last());
+        realtime_reply[port] = static_cast<uint8_t>(realtime_reply[port] | bits);
+    }
+    return progress;
+}
+
+// Their replies, without $N, each when it fits: Ctrl-X and '~' "ok", '!' "ok @9 V0" (serial.c:352, 357, 379).
+bool send_realtime() {
+    bool progress = false;
+    for (uint8_t port = 0; port < serial::kPorts; ++port) {
+        uint8_t& bits = realtime_reply[port];
+        while (bits != 0 && serial::tx_room(port) >= kReplyMax) {
+            const uint8_t bit = bits & serial::kRtStop ? serial::kRtStop : bits & serial::kRtHold ? serial::kRtHold : serial::kRtResume;
+            emit(port, "", bit == serial::kRtHold ? "ok @9 V0" : "ok");
+            bits = static_cast<uint8_t>(bits & ~bit);
+            progress = true;
+        }
+    }
+    return progress;
+}
+
 }  // namespace
 
 void init() {
@@ -324,15 +360,13 @@ void init() {
     started = 0;
     next_port = 0;
     for (line::Assembler& a : assembler) a = line::Assembler();
+    for (uint8_t& r : realtime_reply) r = 0;
 }
 
 bool poll() {
     bool progress = false;
-    if (serial::take_stop_request()) {  // Ctrl-X (Q-48): like S1100, without a reply of its own
-        commands::stop();
-        abort_all();
-        progress = true;
-    }
+    progress = take_realtime() || progress;
+    progress = send_realtime() || progress;
     progress = commands::poll() || progress;
     if (commands::take_fault()) {  // lost steps (SP-41): as S1100; the moving command gets E25
         commands::stop();

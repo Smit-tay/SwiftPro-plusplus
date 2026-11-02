@@ -19,6 +19,7 @@
 //   # text                    comment
 //   ~ ms <n>                  run n ms of simulated time
 //   > <text>                  send text and "\n" (fed at line rate; run time with ~ ms)
+//   >raw <text>               send text exactly, with the escapes \n \r \\ \xNN (e.g. ">raw \x18" is Ctrl-X)
 //   < <text>                  the next output line equals text
 //   <re <regex>               the next output line matches regex (whole line)
 //   <skip <regex>             drop output lines matching regex until one doesn't (for periodic @3)
@@ -410,6 +411,22 @@ int main(int argc, char** argv) {
             unmatched();
             for (char ch : line.substr(2)) rx_pending.push_back(static_cast<uint8_t>(ch));
             rx_pending.push_back('\n');
+        } else if (line.rfind(">raw ", 0) == 0) {
+            unmatched();
+            const std::string text = line.substr(5);
+            for (size_t i = 0; i < text.size(); ++i) {
+                if (text[i] != '\\' || i + 1 == text.size()) {
+                    rx_pending.push_back(static_cast<uint8_t>(text[i]));
+                    continue;
+                }
+                const char e = text[++i];
+                if (e == 'n') rx_pending.push_back('\n');
+                else if (e == 'r') rx_pending.push_back('\r');
+                else if (e == 'x' && i + 2 < text.size() + 1) {
+                    rx_pending.push_back(static_cast<uint8_t>(std::stoi(text.substr(i + 1, 2), nullptr, 16)));
+                    i += 2;
+                } else rx_pending.push_back(static_cast<uint8_t>(e));
+            }
         } else if (line.rfind("<skip ", 0) == 0) {
             const std::regex re(line.substr(6));
             while (!out_lines.empty() && std::regex_match(out_lines.front(), re)) out_lines.pop_front();

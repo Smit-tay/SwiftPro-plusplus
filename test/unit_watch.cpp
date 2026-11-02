@@ -48,6 +48,30 @@ void test_watch() {
     CHECK(out.find("$2 E25\n") != std::string::npos);
     CHECK(commands::idle());
 
+    // M2124 V1 (Q-72): the same slip, and the re-sync that corrects R by 3 deg beeps for 260 ms. The reply waits for
+    // the buzzer, so it comes at least 250 ms later than without the beep.
+    const auto reply_ms = [](bool beep) {
+        boot();
+        if (beep) {
+            sim_rx("#3 M2124 V1\n");
+            sim_settle();
+            CHECK(sim_take_tx() == "$3 ok\n");
+        }
+        sim_rx("#4 G2202 N2 V100 F1000\n");
+        sim_advance_ms(50);
+        sim_set("enc.slip", "R35");
+        std::string got;
+        int ms = 0;
+        for (; ms < 5000 && got.find("$4 E25\n") == std::string::npos; ++ms) {
+            sim_advance_ms(1);
+            got += sim_take_tx();
+        }
+        return ms;
+    };
+    const int quiet = reply_ms(false), beeped = reply_ms(true);
+    CHECK(quiet < 5000 && beeped < 5000);
+    CHECK(beeped - quiet >= 250);
+
     // Bad values for the sim key itself.
     CHECK(!sim_set("enc.slip", "X1"));
     CHECK(!sim_set("enc.slip", "R"));

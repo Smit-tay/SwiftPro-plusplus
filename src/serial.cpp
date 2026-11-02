@@ -48,7 +48,8 @@ volatile uint8_t tx_tail = 0;  // written by the UDRE ISR
 uint8_t tx_port = 0;           // the port the TX ring is serving
 
 volatile uint8_t rx_last = 0;  // the port that received the last byte
-volatile bool stop_request = false;
+volatile uint8_t realtime[kPorts] = {};  // kRt* bits per port, set by the RX ISR
+volatile bool hold_wanted = false;     // the last of '!' and '~' was '!'
 
 #if defined(__AVR__)
 // Bit positions are the same in all four USARTs.
@@ -103,7 +104,8 @@ void init() {
     tx_head = tx_tail = 0;
     tx_port = 0;
     rx_last = 0;
-    stop_request = false;
+    for (volatile uint8_t& r : realtime) r = 0;
+    hold_wanted = false;
 #if defined(__AVR__)
     init_port(UCSR0A, UCSR0B, UBRR0H, UBRR0L);
     init_port(UCSR1A, UCSR1B, UBRR1H, UBRR1L);
@@ -154,17 +156,28 @@ bool write(uint8_t port, const char* s) {
 
 uint8_t last_port() { return rx_last; }
 
-bool take_stop_request() {
-    if (!stop_request) return false;
-    stop_request = false;
-    return true;
+uint8_t take_realtime(uint8_t port) {
+    InterruptLock lock;
+    const uint8_t bits = realtime[port];
+    realtime[port] = 0;
+    return bits;
 }
+
+bool hold_last() { return hold_wanted; }
 
 void on_rx(uint8_t port, uint8_t c) {
     rx_last = port;
     switch (c) {
-        case 0x18: stop_request = true; return;          // Ctrl-X (Q-48)
-        case '?': case '!': case '~': case '@': return;  // Q-15: dropped, no action
+        case 0x18: realtime[port] = static_cast<uint8_t>(realtime[port] | kRtStop); return;  // Ctrl-X (Q-48, Q-71)
+        case '!':  // feed hold (Q-71)
+            realtime[port] = static_cast<uint8_t>(realtime[port] | kRtHold);
+            hold_wanted = true;
+            return;
+        case '~':  // resume (Q-71)
+            realtime[port] = static_cast<uint8_t>(realtime[port] | kRtResume);
+            hold_wanted = false;
+            return;
+        case '?': case '@': return;  // Q-15: dropped, no action
         default: break;
     }
     RxRing& r = rx[port];

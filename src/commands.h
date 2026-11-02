@@ -16,7 +16,7 @@
 namespace commands {
 
 enum class Status : uint8_t {
-    kOk, kE20, kE21, kE22, kE25, kE26,
+    kOk, kE20, kE21, kE22, kE25, kE26, kE27,
     kPending,  // not finished: call resume() on later main-loop passes until it returns something else
 };
 
@@ -45,8 +45,12 @@ bool poll();
 // The next unsolicited event line, without its "\n" (@8, @9, @6, @5, @4); false if none is waiting.
 bool next_event(fmt::Writer& out);
 
-// S1100 and Ctrl-X: stop everything now.
+// S1100, Ctrl-X and lost steps: stop everything now. Once the arm is at rest the locked joints are re-read from their
+// encoders (Q-71).
 void stop();
+
+// S1000 and the realtime bytes '!' (on) and '~' (off): feed hold.
+void hold(bool on);
 
 // True once after the lost-step watch has found a fault (SP-41): the protocol then stops everything, as S1100.
 bool take_fault();
@@ -61,7 +65,7 @@ bool idle();
 // Whether a sync command of this kind may start now (uarm_protocol.c:145-150 plus Q-5).
 bool can_start(Kind k);
 
-// M2124 V1: a motion command's reply is sent when it is accepted (Q-32).
+// M2126 V1: a motion command's reply is sent when it is accepted (Q-32, Q-72).
 bool streaming();
 
 uint8_t work_mode();  // for the boot banner

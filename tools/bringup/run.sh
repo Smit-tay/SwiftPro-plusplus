@@ -14,6 +14,7 @@
 #   #N <command>     send it, then wait (up to 60 s) for its reply "$N ..."; a move replies when the arm has stopped
 #   & #N <command>   send it and go on at once (to interrupt a move: hold, stop)
 #   //wait <s>       pause
+#   //raw <byte>     send one realtime byte, no line end: ! (hold), ~ (resume) or ^X (Ctrl-X, stop)
 #   //ask <text>     show the text and wait for Enter (Ctrl-C ends the run)
 #   //<text>         a heading, shown and logged
 #   blank lines are ignored
@@ -62,6 +63,10 @@ while IFS= read -r line || [[ -n $line ]]; do
     case $line in
         '') continue ;;
         '//wait '*) sleep "${line#//wait }" ;;
+        '//raw '*)
+            byte=${line#//raw }
+            note ">> realtime $byte"
+            if [[ $byte == '^X' ]]; then printf '\x18' >&3; else printf '%s' "$byte" >&3; fi ;;
         '//ask '*)
             note "?? ${line#//ask }"
             printf '   press Enter to go on > ' >&2

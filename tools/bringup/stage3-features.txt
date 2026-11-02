@@ -39,18 +39,18 @@
 #38 G1 X240 Y0 Z64 F50
 #39 P2220
 
-//3. Streamed moves (M2124 V1): five replies at once, the arm runs the square WITHOUT STOPPING at the corners,
+//3. Streamed moves (M2126 V1): five replies at once, the arm runs the square WITHOUT STOPPING at the corners,
 //then "@9 V0" when it stops
 //ask Watch the corners of the next square. Press Enter to start.
 #40 M2122 V1
-#41 M2124 V1
+#41 M2126 V1
 #42 G0 X260 Y20 Z64 F100
 #43 G0 X260 Y-20 Z64 F100
 #44 G0 X220 Y-20 Z64 F100
 #45 G0 X220 Y20 Z64 F100
 #46 G0 X240 Y0 Z64 F100
 //wait 6
-#47 M2124 V0
+#47 M2126 V0
 #48 M2122 V0
 //ask Did it run through the corners without stopping? Note it for the report. Press Enter to go on.
 

@@ -27,9 +27,26 @@ struct Offsets {
     float height;  // EEPROM 910 (mode 0 default 74.55)
 };
 
-// Joint limits (uarm_coord_convert.c:55-62, 77-101): L -20..135.6, R -20..119.9, 180-L-R in 10..151, base -90..90.
-// NaN is illegal.
-bool legal(float a, float b, float c);
+// Joint limits, degrees: the arm's stops found by hand with the joints released (TEACHABLE runs of 2026-10-21 and
+// 2026-10-24), each a little inside (Q-82, Q-83, the 2026-10-24 refit). docs/LIMITS.md section 6 derives them; this
+// and kin.cpp's R table are the only place they are defined.
+struct Range {
+    float lo, hi;
+};
+constexpr Range kLimitL{-13.8f, 135.6f};    // stops -14.79 / 136.73; the top stays at the original's 135.6
+constexpr Range kLimitBase{-95.0f, 95.0f};  // the -90 frame; stops -7.56 / 187.65 in the user frame (2026-10-24)
+
+// The range of R at L = a: R's stops move with L, and the elbow's (180 - L - R) lie inside this range. Straight lines
+// between points every 5 deg of L (tools/limits_sweep/fit_table.py); outside kLimitL, the nearest end's range.
+Range limit_r(float a);
+
+// For a joint move along L from (a, b), up or down: the farthest L it reaches while R = b stays inside the limits all
+// the way, and that lies inset inside them (L's and R's). a itself if there is none, or if (a, b) is outside them.
+float l_reach(float a, float b, bool up, float inset);
+
+// True if L, R (at that L) and the base lie inside their limits, each range shrunk by inset at both ends. NaN is
+// illegal.
+bool legal(float a, float b, float c, float inset = 0.0f);
 
 // Joints to the arm frame.
 void forward(float a, float b, float c, float* x, float* y, float* z);

@@ -8,7 +8,10 @@
 //  - TX never blocks (SP-02, Q-21): write() is all-or-nothing and the caller checks tx_room() first. The ring serves one
 //    port at a time: a write for another port waits (tx_room() is 0 for it) until the ring has drained, so lines are
 //    never split across ports.
-//  - Realtime bytes (Q-15): '?' '!' '~' '@' are dropped with no action; 0x18 (Ctrl-X) on any port is a stop request.
+//  - Realtime bytes, taken out of the stream wherever they appear (Q-15, Q-71): 0x18 (Ctrl-X) = stop, '!' = feed hold,
+//    '~' = resume, on any port; take_realtime() hands them to the main loop, which acts and replies (as V4.10.0
+//    serial.c:350-385, but outside the ISR). Repeats of one byte before the main loop takes them count once. '?' and
+//    '@' are dropped with no action.
 //  - RX pins have pull-ups (Q-16), so an unconnected port can't pick up noise.
 // The original shared one RX ring between all four ports and sent replies to whichever port received the last byte,
 // so two active ports could splice each other's lines (SP-31).
@@ -33,7 +36,10 @@ bool read(uint8_t port, uint8_t* c);              // false if that port's ring i
 uint16_t tx_room(uint8_t port);                   // bytes write() can take now for this port
 bool write(uint8_t port, const char* s, uint16_t n);  // all or nothing; false (nothing written) if it doesn't fit
 bool write(uint8_t port, const char* s);          // NUL-terminated
-bool take_stop_request();                         // true once per Ctrl-X received
+// Realtime bytes received on port since the last call, as a mask of the bits below; each is taken once.
+constexpr uint8_t kRtStop = 1, kRtHold = 2, kRtResume = 4;
+uint8_t take_realtime(uint8_t port);
+bool hold_last();  // of '!' and '~', whether the most recent (on any port) was '!'
 uint8_t last_port();                              // the port that received the last byte (for unsolicited events)
 
 // ISR side. Called by the USART ISRs on the AVR, and directly by host tests and the simulator.

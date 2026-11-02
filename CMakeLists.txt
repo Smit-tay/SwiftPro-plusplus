@@ -29,7 +29,7 @@ set(MODULES
     src/line.cpp src/parse.cpp src/serial.cpp src/fmt.cpp src/tick.cpp src/nvm.cpp src/board.cpp
     src/commands.cpp src/protocol.cpp src/app.cpp src/kin.cpp src/encoder.cpp
     src/planner.cpp src/stepgen.cpp src/stepper.cpp src/motion.cpp src/adc.cpp src/effector.cpp src/buzzer.cpp
-    src/report.cpp src/pins.cpp src/tool.cpp)
+    src/report.cpp src/pins.cpp src/tool.cpp src/xeeprom.cpp)
 
 set(WARNINGS -Wall -Wextra -Wconversion -Wdouble-promotion -Werror)
 

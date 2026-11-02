@@ -7,9 +7,10 @@ compile_commands.json
 *.bin
 *.elf
 
-# Serial logs written by tools/bringup/run.sh and tools/probe/probe-send.sh while testing
+# Serial logs written by tools/bringup/run.sh, tools/probe/probe-send.sh and tools/limits_sweep/teach_log.py
 tools/bringup/*.log
 tools/probe/*.log
+teach-*.csv
 
 # Editors and IDEs
 .kdev4/
@@ -19,3 +20,9 @@ tools/probe/*.log
 *~
 .~lock.*#
 .vs/
+
+# Python bytecode
+__pycache__/
+
+# Vendor manuals: kept locally, not ours to redistribute
+docs/*.pdf

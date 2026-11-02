@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: MIT
+# Jogs, back inside the limits, button state: G2207, G2208, G2209, P2236 (parity A4, Q-76; V4.10.0
+# uarm_protocol.c:408-1440, 2576-2589). Every jog stops kJogInset = 1 deg inside the limits (motion.h), which are
+# the measured stops minus 1 deg (Q-83, kin.h): L, the base, and R's range at each L.
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# G2208 N1 F+: L up until R's maximum at that L is 1 deg above R = 66.04. The table's line from L 100 (68) to 105
+# (63) meets 67.04 at L 100.96; P2206 reads the encoder (0.088 deg steps).
+#: change Q-76 Q-83 (V4.10.0 :1260-1269, inset 1 deg instead of truncating to an integer)
+> #1 G2208 N1 F1000
+~ idle
+< $1 ok
+> #2 P2206 N1
+<re ^\$2 ok V(100\.(8[89]|9[0-9])|101\.0[0-5])[0-9]*$
+
+# Already at the edge (less than 0.7 deg to go): E22, as the original.
+#: change Q-76 (V4.10.0 :1266-1267)
+> #3 G2208 N1 F1000
+< $3 E22
+
+# G2208 N2 F-: R down to its minimum at L 100.96 plus 1: -18 + 1 = -17.
+#: change Q-76 Q-83 (V4.10.0 :1293-1302)
+> #4 G2208 N2 F-1000
+~ idle
+< $4 ok
+> #5 P2206 N2
+<re ^\$5 ok V-(16\.9[0-9]|17\.0[0-9])[0-9]*$
+
+# G2208 N0 F+: the base to its limit 95 - 1 in the -90 frame, 184 in the user frame. F0 is E21 (Q-73, not "ok,
+# no move").
+#: change Q-76 Q-73 Q-83 (V4.10.0 :1255-1259 went to exactly 90)
+> #6 G2208 N0 F1000
+~ idle
+< $6 ok
+> #7 P2206 N0
+<re ^\$7 ok V(183\.9[2-9]|184\.0[0-8])[0-9]*$
+> #8 G2208 N0 F0
+< $8 E21
+
+# G2207 at that pose: R and the base sit exactly on the 1 deg inset, so Z up (R down) and X down (base past 94)
+# have nowhere to go: E22.
+#: change Q-76
+> #9 G2207 N2 F500
+< $9 E22
+> #10 G2207 N0 F-500
+< $10 E22
+
+# G2207 N0 F+ from the boot pose: a straight line along +X until R is 1 deg above its minimum at that L (about
+# X 347-348: L 13.34, R 28.69 against 27.66). Y and Z stay (within encoder rounding).
+#: change Q-76 Q-83 (V4.10.0 :408-640; our IK and limits instead of the original's per-axis formulas)
+> #11 G2206 B90 L45.68 R66.04 F1000
+~ idle
+< $11 ok
+> #12 G2207 N0 F500
+~ idle
+< $12 ok
+> #13 P2220
+<re ^\$13 ok X34[78]\.[0-9]+ Y-?0\.[0-2][0-9]* Z-10\.[5-8][0-9]*$
+
+# A jog is ended by S1100 like any move: the jog gets E25 (Q-46).
+#: change Q-76 Q-46
+> #14 G2207 N0 F-50
+~ ms 300
+> #15 S1100
+< $15 ok
+~ idle
+< $14 E25
+
+# A released joint: E27 for jogs and G2209 (Q-70).
+#: change Q-76 Q-70
+> #16 M2202 N1
+< $16 ok
+> #17 G2208 N0 F100
+< $17 E27
+> #18 G2207 N1 F100
+< $18 E27
+> #19 G2209
+< $19 E27
+> #20 M2201 N1
+< $20 ok
+
+# Bad parameters: N outside 0-2, F missing.
+#: change Q-76
+> #21 G2208 N3 F100
+< $21 E21
+> #22 G2207 N0
+< $22 E21
+
+# P2236: V0 pressed, V1 released, the pin as it is now (not debounced); N0 Menu, N1 Play.
+#: change Q-76 (V4.10.0 :2576-2589, uarm_peripheral.c:931-962)
+> #23 P2236 N0
+< $23 ok V1
+= button play down
+> #24 P2236 N1
+< $24 ok V0
+> #25 P2236 N2
+< $25 E21
+
+# G2209: L was moved beyond its limit (137) while released, with R far above its range there. After the re-sync, L
+# goes to 135.6 - 2 = 133.6, then R to its range at that L (-18 .. 34.4) less 2: 32.4.
+#: change Q-76 Q-83 (V4.10.0 :1331-1440 moved only joints outside their own limits, not the elbow)
+= enc.raw B1654 L3859 R1900
+~ boot quiet
+> #26 P2200
+<re ^\$26 ok B89\.9121 L136\.99[0-9]* R109\.72[0-9]*$
+> #27 G2209 F1000
+~ idle
+< $27 ok
+> #28 P2200
+<re ^\$28 ok B89\.9121 L133\.5[0-9]* R32\.3[0-9]*$
+
+# Inside the limits already: ok, nothing moves.
+#: change Q-76
+> #29 G2209
+< $29 ok
+> #30 M2200
+< $30 ok V0

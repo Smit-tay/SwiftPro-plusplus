@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: MIT
+# Commands from 3.x that 4.x lacks (parity A7, Q-80), and the external EEPROM (parity A9 step 1, Q-81).
+# 3.x citations are uarm-v3.1.18-dev/lib/Marlin/; the EEPROM model is test/sim.cpp (64 KiB, 128-byte pages, erased).
+
+= mode 0
+= enc.ref B1655 L2673 R1664
+= enc.raw B1654 L2820 R1403
+~ boot quiet
+
+# G2203: ok once every queued move has finished (Marlin_main.cpp:7642-7646). Its reply comes after the move's.
+#: change Q-80
+> #1 G2202 N0 V100 F1000
+> #2 G2203
+~ idle
+< $1 ok
+< $2 ok
+> #3 G2203 V1
+< $3 E21
+
+# P2245: "ok" and nothing (uArmSwift.cpp:1454-1458).
+#: change Q-80
+> #4 P2245
+< $4 ok
+
+# M3 laser off, M5 [P] laser on, in mode 1 only (uArmSwift.cpp:285-332); P is kept; P0 = off (no PWM yet).
+#: change Q-80
+> #5 M5
+< $5 ok
+> #6 P2235
+< $6 ok V0
+> #7 M2400 S1
+< $7 ok
+> #8 M5
+< $8 ok
+> #9 P2235
+< $9 ok V1
+> #10 M3
+< $10 ok
+> #11 P2235
+< $11 ok V0
+> #12 M5 P0
+< $12 ok
+> #13 P2235
+< $13 ok V0
+> #14 M5
+< $14 ok
+> #15 P2235
+< $15 ok V0
+> #16 M5 P256
+< $16 E21
+> #17 M5 P200
+< $17 ok
+> #18 P2235
+< $18 ok V1
+> #19 M3
+< $19 ok
+> #20 M2400 S0
+< $20 ok
+
+# M2410 S<h>: the height offset given, as M2413 H (uArmSwift.cpp:1214-1240). Back to 74.55 afterwards.
+#: change Q-80
+> #21 M2410 S70
+< $21 ok
+> #22 P2220
+<re ^\$22 ok X[0-9.]+ Y-?[0-9.]+ Z-6\.0846$
+> #23 M2413 H74.55
+< $23 ok
+> #24 M2410 SX
+< $24 E21
+
+# M2401 B: as M2401 (uArmSwift.cpp:1168-1188); "V<code>" is not ported.
+#: change Q-80
+> #25 M2401 B
+< $25 ok
+> #26 M2401 V1234
+< $26 E21
+
+# M2211 N0: the AVR's own EEPROM, read only (3.x uArmAPI.cpp:686-730): 900 = the work mode byte, 910 = the height
+# offset float, 818 = the reference flag 0xBB; T2 little-endian. M2212 N0 is refused (Q-80).
+#: change Q-80
+> #27 M2211 N0 A900 T1
+< $27 ok V0
+> #28 M2211 N0 A910 T4
+< $28 ok V74.5500
+> #29 M2211 N0 A818 T2
+<re ^\$29 ok V-?[0-9]+$
+> #30 M2211 N0 A4093 T4
+< $30 E21
+> #31 M2212 N0 A900 T1 V1
+< $31 E21
+
+# M2211/M2212 N1: the external EEPROM (V4.10.0 uarm_protocol.c:1773-1860). Erased reads 255; T2 big-endian.
+#: change Q-81 (V4.10.0 replied with whatever it read even with no chip; we reply E26)
+> #32 M2211 N1 A0 T1
+< $32 ok V255
+> #33 M2212 N1 A10 T1 V42
+~ ms 20
+< $33 ok
+> #34 M2211 N1 A10 T1
+< $34 ok V42
+> #35 M2212 N1 A20 T2 V-2
+~ ms 20
+< $35 ok
+> #36 M2211 N1 A20 T2
+< $36 ok V-2
+> #37 M2211 N1 A20 T1
+< $37 ok V255
+> #38 M2212 N1 A30 T4 V-12.5
+~ ms 20
+< $38 ok
+> #39 M2211 N1 A30 T4
+< $39 ok V-12.5000
+
+# A float across a page boundary (126-129): written in two parts, each waiting for the chip's write cycle (5 ms in
+# the model), so the reply comes about 10 ms later.
+#: change Q-81
+> #40 M2212 N1 A126 T4 V3.25
+~ ms 20
+< $40 ok
+> #41 M2211 N1 A126 T4
+< $41 ok V3.2500
+# 3.25 = 0x40500000, little-endian: byte 128 is 0x50.
+> #42 M2211 N1 A128 T1
+< $42 ok V80
+
+# Bad fields: T3, N2, address past 65524, a byte above 255.
+#: change Q-81
+> #43 M2211 N1 A0 T3
+< $43 E21
+> #44 M2211 N2 A0 T1
+< $44 E21
+> #45 M2211 N1 A65525 T1
+< $45 E21
+> #46 M2212 N1 A0 T1 V256
+< $46 E21
+
+# No chip: E26 for reads and writes.
+#: change Q-81 SP-15
+= xeeprom absent
+> #47 M2211 N1 A0 T1
+< $47 E26
+> #48 M2212 N1 A0 T1 V1
+< $48 E26
+
+# PB6 and PB7 (Arduino 12, 13) belong to the EEPROM bus now: the raw pin commands refuse to drive them (Q-17).
+#: change Q-81 Q-17
+> #49 M2241 N13 V0
+< $49 E21
+> #50 M2240 N12 V1
+< $50 E21

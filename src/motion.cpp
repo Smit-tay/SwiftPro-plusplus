@@ -31,6 +31,8 @@ constexpr uint8_t kAccelMark = 0xA5;
 constexpr float kLineTolerance = 0.02f;
 constexpr float kPieceMax = 20.0f;   // mm
 constexpr float kPieceMin = 0.25f;   // mm
+constexpr float kJogReach = 1000.0f;   // mm: farther than the arm reaches, the start of a linear jog's search
+constexpr float kJogResolution = 0.1f;  // mm: how close the search comes to the edge
 
 float init_angle[3] = {};  // L, R, B (user frame) at tally 0
 uint8_t known_mask = 0;
@@ -40,7 +42,8 @@ kin::Offsets offs{56.65f, 74.55f};
 
 // A linear move: first checked piece by piece (nothing moves), then cut into the planner piece by piece. Both passes
 // run the same cutting, one piece per main-loop pass.
-enum class Phase : uint8_t { kIdle, kChecking, kRunning };
+// A linear jog first walks out along its axis to find the edge (kSearching), then is checked and run as any line.
+enum class Phase : uint8_t { kIdle, kSearching, kChecking, kRunning };
 struct Line {
     Phase phase = Phase::kIdle;
     Result result = Result::kOk;
@@ -51,6 +54,8 @@ struct Line {
     float piece = 5.0f;    // the last piece length, mm
     float joints[3];       // joint angles (L, R, B in the -90 frame) at `done`
     float speed = 0.0f;    // deg/s
+    float inset = 0.0f;    // deg, the limits are shrunk by this (jogs)
+    float edge = 0.0f;     // kSearching: 0 while walking out, then the first illegal distance found, mm
 };
 Line line;
 
@@ -73,37 +78,32 @@ void effector_of(const float j[3], float xyz[3]) {
     kin::arm_to_effector(offs, &xyz[0], &xyz[1], &xyz[2]);
 }
 
-// Effector point -> joints; false if out of reach or out of the joint limits.
-bool joints_of(const float xyz[3], float j[3]) {
+// Effector point -> joints; false if out of reach or out of the joint limits (shrunk by inset).
+bool joints_of(const float xyz[3], float j[3], float inset = 0.0f) {
     float x = xyz[0], y = xyz[1], z = xyz[2];
     kin::effector_to_arm(offs, &x, &y, &z);
     kin::inverse(x, y, z, &j[0], &j[1], &j[2]);
-    return kin::legal(j[0], j[1], j[2]);
+    return kin::legal(j[0], j[1], j[2], inset);
 }
 
 float speed_of(float f) { return f * kUnitsToDegPerS; }
 
 bool usable_f(float f) { return !isnan(f) && f > 0.0f; }  // SP-09
 
-// The moves need every joint they turn to be locked (released joints don't follow their steps).
-bool needs_released(const int32_t target[3]) {
-    const int32_t* from = planner::end_position();
-    for (uint8_t i = 0; i < 3; ++i)
-        if (target[i] != from[i] && (locked_mask & (1u << i)) == 0) return true;
-    return false;
-}
+// Every move needs all three joints locked, whichever it turns (Q-70, as V4.10.0 motion_control.c:69): a released
+// joint doesn't hold the position the move starts from.
+bool all_locked() { return locked_mask == 7; }
 
 Result queue_joints(const float j[3], float f) {
     if (!kin::legal(j[0], j[1], j[2])) return Result::kUnreachable;
     int32_t target[3];
     to_steps(j, target);
-    if (needs_released(target)) return Result::kReleased;
     planner::add(target, speed_of(f));  // the caller checked busy(): there is room
     return Result::kOk;
 }
 
 // One piece of a linear move from line.done: its length (adapted to the path's curvature) and end joints.
-// Returns false if the path leaves the joint limits.
+// Returns false if the path leaves the joint limits; *len is then the length that was tried.
 bool next_piece(float* len, float end_joints[3]) {
     float l = line.piece * 1.5f;
     if (l > kPieceMax) l = kPieceMax;
@@ -116,7 +116,10 @@ bool next_piece(float* len, float end_joints[3]) {
             p1[i] = line.from[i] + u * (line.done + l);
             pm[i] = line.from[i] + u * (line.done + 0.5f * l);
         }
-        if (!joints_of(p1, j1) || !joints_of(pm, jm)) return false;
+        if (!joints_of(p1, j1, line.inset) || !joints_of(pm, jm, line.inset)) {
+            *len = l;
+            return false;
+        }
         float err = 0.0f;
         for (uint8_t i = 0; i < 3; ++i) {
             const float e = fabsf(jm[i] - 0.5f * (line.joints[i] + j1[i]));
@@ -144,6 +147,7 @@ void start_line(const float from[3], const float to[3], float f, const float joi
     line.done = 0.0f;
     line.piece = 5.0f;
     line.speed = speed_of(f);
+    line.inset = 0.0f;
 }
 
 Result do_line(const float to[3], float f) {
@@ -170,13 +174,6 @@ void check_step() {
     line.done += l;
     line.piece = l;
     for (uint8_t i = 0; i < 3; ++i) line.joints[i] = j[i];
-    int32_t target[3];
-    to_steps(j, target);
-    if (needs_released(target)) {
-        line.phase = Phase::kIdle;
-        line.result = Result::kReleased;
-        return;
-    }
     if (line.done >= line.length) {  // all of it is reachable: start again from the beginning, for real
         line.done = 0.0f;
         line.piece = 5.0f;
@@ -184,6 +181,41 @@ void check_step() {
         line.phase = Phase::kRunning;
         line.result = Result::kOk;
     }
+}
+
+// One step of a linear jog's search: walk out piece by piece to the first illegal piece, then halve the gap between
+// the last legal point and it. The line is then cut back to the edge and checked from the start.
+void search_step() {
+    if (line.edge == 0.0f) {
+        float l, j[3];
+        if (!next_piece(&l, j)) {
+            line.edge = line.done + l;
+            return;
+        }
+        line.done += l;
+        line.piece = l;
+        for (uint8_t i = 0; i < 3; ++i) line.joints[i] = j[i];
+        if (line.done < line.length) return;
+        line.edge = line.length;  // never left the limits (can't happen: kJogReach is beyond reach)
+    } else if (line.edge - line.done > kJogResolution) {
+        const float mid = 0.5f * (line.done + line.edge);
+        float p[3], j[3];
+        for (uint8_t i = 0; i < 3; ++i) p[i] = line.from[i] + (line.to[i] - line.from[i]) / line.length * mid;
+        if (joints_of(p, j, line.inset)) line.done = mid;
+        else line.edge = mid;
+        return;
+    }
+    if (line.done < kJogMin) {
+        line.phase = Phase::kIdle;
+        line.result = Result::kUnreachable;
+        return;
+    }
+    for (uint8_t i = 0; i < 3; ++i) line.to[i] = line.from[i] + (line.to[i] - line.from[i]) / line.length * line.done;
+    line.length = line.done;
+    line.done = 0.0f;
+    line.piece = 5.0f;
+    for (uint8_t i = 0; i < 3; ++i) line.joints[i] = line.start_joints[i];
+    line.phase = Phase::kChecking;
 }
 
 }  // namespace
@@ -235,7 +267,10 @@ Result line_result() { return line.result; }
 bool poll() {
     bool work = false;
     // A linear move: one piece per pass (each costs two IK solutions).
-    if (line.phase == Phase::kChecking) {
+    if (line.phase == Phase::kSearching) {
+        search_step();
+        work = true;
+    } else if (line.phase == Phase::kChecking) {
         check_step();
         work = true;
     } else if (line.phase == Phase::kRunning && !planner::full()) {
@@ -267,6 +302,7 @@ bool idle() { return line.phase == Phase::kIdle && stepgen::idle() && !stepper::
 Result move_joints(const float a[3], float f) {
     if (!known()) return Result::kNoPosition;
     if (!usable_f(f)) return Result::kBadParam;
+    if (!all_locked()) return Result::kReleased;
     float j[3];
     end_angles(j);
     if (!isnan(a[0])) j[0] = a[0];
@@ -278,6 +314,7 @@ Result move_joints(const float a[3], float f) {
 Result move_xyz(const float xyz[3], bool linear, float f) {
     if (!known()) return Result::kNoPosition;
     if (!usable_f(f)) return Result::kBadParam;
+    if (!all_locked()) return Result::kReleased;
     float j0[3], here[3], to[3];
     end_angles(j0);
     effector_of(j0, here);
@@ -291,6 +328,7 @@ Result move_xyz(const float xyz[3], bool linear, float f) {
 Result move_xyz_relative(const float d[3], float f) {
     if (!known()) return Result::kNoPosition;
     if (!usable_f(f)) return Result::kBadParam;
+    if (!all_locked()) return Result::kReleased;
     float j0[3], to[3];
     end_angles(j0);
     effector_of(j0, to);
@@ -301,6 +339,7 @@ Result move_xyz_relative(const float d[3], float f) {
 Result move_polar(float s, float r, float h, bool relative, float f) {
     if (!known()) return Result::kNoPosition;
     if (!usable_f(f)) return Result::kBadParam;
+    if (!all_locked()) return Result::kReleased;
     float to[3];
     if (relative) {  // from where the queued motion ends: radius + s, heading + r, height + h (uarm_protocol.c:347-366)
         float j0[3], here[3];
@@ -320,10 +359,67 @@ Result move_polar(float s, float r, float h, bool relative, float f) {
     return do_line(to, f);
 }
 
+Result jog_joint(uint8_t axis, float f) {
+    if (!known()) return Result::kNoPosition;
+    const float speed = fabsf(f);
+    if (!usable_f(speed)) return Result::kBadParam;
+    if (!all_locked()) return Result::kReleased;
+    float j[3];
+    end_angles(j);
+    const bool up = f > 0.0f;
+    float target;
+    if (axis == 2) {
+        target = up ? kin::kLimitBase.hi - kJogInset : kin::kLimitBase.lo + kJogInset;
+    } else if (axis == 1) {  // R's range at this L
+        const kin::Range r = kin::limit_r(j[0]);
+        target = up ? r.hi - kJogInset : r.lo + kJogInset;
+    } else {  // R's range moves with L: as far as R stays inside it
+        target = kin::l_reach(j[0], j[1], up, kJogInset);
+    }
+    if ((up ? target - j[axis] : j[axis] - target) < kJogMin) return Result::kUnreachable;
+    j[axis] = target;
+    return queue_joints(j, speed);
+}
+
+Result jog_xyz(uint8_t axis, float f) {
+    if (!known()) return Result::kNoPosition;
+    const float speed = fabsf(f);
+    if (!usable_f(speed)) return Result::kBadParam;
+    if (!all_locked()) return Result::kReleased;
+    float j0[3], from[3], to[3];
+    end_angles(j0);
+    effector_of(j0, from);
+    for (uint8_t i = 0; i < 3; ++i) to[i] = from[i];
+    to[axis] += f > 0.0f ? kJogReach : -kJogReach;
+    start_line(from, to, speed, j0);
+    // Already within kJogInset of a limit: search with the limits themselves, so the jog can still move away from it.
+    line.inset = kin::legal(j0[0], j0[1], j0[2], kJogInset) ? kJogInset : 0.0f;
+    line.edge = 0.0f;
+    line.phase = Phase::kSearching;
+    line.result = Result::kChecking;
+    return Result::kChecking;
+}
+
+Result into_limits(float f) {
+    if (!known()) return Result::kNoPosition;
+    if (!usable_f(f)) return Result::kBadParam;
+    if (!all_locked()) return Result::kReleased;
+    float j[3];
+    end_angles(j);
+    if (kin::legal(j[0], j[1], j[2])) return Result::kOk;
+    const auto inside = [](float v, kin::Range r) {
+        return v < r.lo ? r.lo + kSettleInset : v > r.hi ? r.hi - kSettleInset : v;
+    };
+    j[0] = inside(j[0], kin::kLimitL);
+    j[1] = inside(j[1], kin::limit_r(j[0]));  // R's range at the corrected L (the elbow's stops are inside it)
+    j[2] = inside(j[2], kin::kLimitBase);
+    return queue_joints(j, f);
+}
+
 void hold(bool on) { stepgen::hold(on); }
 
 void stop() {
-    if (line.phase == Phase::kChecking) line.result = Result::kOk;  // the command is answered with E25 by the stop
+    if (line.phase == Phase::kChecking || line.phase == Phase::kSearching) line.result = Result::kOk;  // the command is answered with E25 by the stop
     line.phase = Phase::kIdle;
     int16_t last[3];
     stepper::stop(last);

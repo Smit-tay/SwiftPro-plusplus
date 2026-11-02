@@ -81,6 +81,53 @@ tools/bringup/run.sh tools/bringup/stage3-features.txt
 | Lost steps (6, optional) | holding the base still at F20 gives `@8 N0 V<error>` and `$50 E25`; the arm stops and re-reads its position |
 | Back home (7) | the probe pose again |
 
+## Stage 4: the V4.10.0 parity items (`tools/bringup/stage4-parity.txt`)
+
+Run it with the interactive runner, as stage 3. It needs the stock arm with motor power, and your hand for steps 4
+and 6 only.
+
+| Check | Expected | If not |
+|---|---|---|
+| `E27` (1, Q-70) | with the base released, `G2202 N1` gives `$11 E27` and L doesn't move; `M2201 N0` locks the base again | L moves: **cut the power** and send the log |
+| `!` / `~` (2, Q-71) | `ok @9 V0` right after `!`, the base slows to a stop, `M2200` says `V1`; `~` gives `ok` and the move ends at 130 | No reply: the byte didn't reach the firmware (check the runner's `//raw`) |
+| Ctrl-X (3, Q-71) | `ok` at once, the base brakes, then `$30 E25`; `P2200` and `@3` agree (the position was re-read once at rest) | Disagreement: report the numbers |
+| `M2124` beep (4, optional, Q-72) | holding the base gives `@8 N0 V…`, `$41 E25`, then a 0.26 s beep | No beep with `@8` present: report it |
+| Jogs (5, Q-76) | `G2208 N0` turns the base towards 180 and `G2207 N2` raises the effector straight up, each until Ctrl-X 0.5 s later (`ok`, then `E25`); `G2209` replies `ok` without moving | A jog in the wrong direction: **cut the power**. Each jog is cut short on purpose: its end point is 1° inside the code's limits, which are not yet checked against your arm (LIMITS.md) |
+| `P2236` (6, Q-76) | `ok V1` released, `ok V0` while you hold Play | Always `V1`: the Play pin (PE6) differs on your board; report it |
+| External EEPROM (7, Q-81) | `M2211 N1` gives `ok V<n>`: the chip is there (learning mode can use it). Read only | `E26`: no chip answered on PB7/PB6, or the bus has no pull-ups; report it. Learning mode then needs another plan |
+
+## Limits: TEACHABLE
+
+For [LIMITS.md](LIMITS.md) §4. **The joints are released for all of it: the arm drops unless you hold it.** Motor
+power on (the encoders need it), nothing fitted to the wrist. No powered move is part of this procedure.
+
+```sh
+python3 -I tools/limits_sweep/teach_log.py /dev/ttyACM0
+```
+
+The script waits for `@1`, asks you to support the arm, sends `M2019`, then logs `P2200` and `P2241 N3` (wrist
+feedback, raw) at 20 Hz into `teach-<time>.csv`. It walks you through these phases; Enter ends each one, `s` skips
+it, `q` finishes:
+
+1. **sweep-LR**: move L and R together through everything they can reach. Follow the edges: folded (arms closest),
+   stretched (arms furthest apart), lower arm fully down and fully up, at several upper-arm angles. The elbow couples
+   them, so the region is what counts, not each joint's range alone.
+2. **sweep-B**: the base from end to end, at a middle L/R pose.
+3. **sweep-wrist**: the wrist from end to end, gently.
+4. **The stops, one at a time**, held while you press Enter (the script keeps the median of the last 0.5 s): L min,
+   L max, R min, R max (each with the other joint mid-range), elbow min (fully folded), elbow max (fully stretched),
+   base min, base max.
+
+At the end it asks before sending `M17`, which locks the joints where they are without moving. Send back the CSV
+and the printed summary. `--summary <csv>` prints the summary again. To repeat some phases only, add
+`--only <phase>[,<phase>...]` (for example `--only sweep-LR`): the script then asks for those and nothing else. `--outline` asks for the L/R region's edge as one loop
+instead: elbow closed while the shoulder goes end to end, elbow opened at that end, shoulder back with the elbow
+open, elbow closed at the other end.
+
+**If a powered check is ever needed** (not part of this procedure; ask first): approach a measured stop from inside
+it, in steps of 1° or less, at F100 or slower, never past the TEACHABLE boundary, and stop at the first sign of a
+skipped step (a click, the joint not following, or `@8`).
+
 ## Afterwards
 
 If all three stages pass, the next steps are:

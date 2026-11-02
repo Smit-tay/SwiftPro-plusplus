@@ -94,6 +94,59 @@
 < ok
 < $19 E25
 
+# Ctrl-X during a move: "ok" at once (Q-71), the move gets E25 after the brake and the re-sync from the encoders.
+> #50 G2202 N0 V160 F50
+~ ms 300
+>raw \x18
+~ ms 500
+< ok
+< $50 E25
+
+# "!" holds a move and replies "ok @9 V0", "~" resumes it and replies "ok" (Q-71).
+> #51 G2202 N0 V40 F50
+~ ms 300
+>raw !
+~ ms 20
+< ok @9 V0
+~ ms 1500
+>raw ~
+~ ms 20
+< ok
+~ ms 2000
+< $51 ok
+> #52 G2202 N0 V90 F100
+~ ms 1500
+< $52 ok
+
+# G2207: the linear jog's edge search runs on the AVR, then the jog moves until S1100 ends it (Q-76). Then back.
+> #53 G2207 N0 F100
+~ ms 400
+> #54 S1100
+~ ms 20
+< $54 ok
+~ ms 800
+< $53 E25
+> #55 G2206 B90 L45.68 R66.04 F100
+~ ms 2000
+< $55 ok
+
+# P2236: the Menu button's pin, pulled up: released (Q-76).
+> #56 P2236 N0
+~ ms 20
+< $56 ok V1
+
+# The external EEPROM bus (PB7/PB6) on the real pins: simavr has no chip there, so no ACK: E26 (Q-81). The AVR's own
+# EEPROM through M2211 N0: the work mode byte (Q-80). G2203 waits for idle and replies ok.
+> #57 M2211 N1 A0 T1
+~ ms 20
+< $57 E26
+> #58 M2211 N0 A900 T1
+~ ms 20
+< $58 ok V0
+> #59 G2203
+~ ms 20
+< $59 ok
+
 # Lost steps: the L encoder stops following its motor.
 = stall L
 > #20 G2202 N1 V80 F500
@@ -120,6 +173,11 @@
 ? en L 0
 ? en R 0
 ? en B 0
+
+# With the joints released every move is refused with E27, and nothing moves (Q-70).
+> #31 G2202 N0 V90 F100
+~ ms 20
+< $31 E27
 
 # Module 5c on the real image: an Arduino pin (23 = PA1), a refused one (54 = PF0, base STEP).
 > #25 M2241 N23 V1

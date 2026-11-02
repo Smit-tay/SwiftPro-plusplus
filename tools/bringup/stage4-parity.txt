@@ -1,0 +1,85 @@
+//SwiftPro++ bring-up, stage 4: the V4.10.0 parity items A1, A2, A4, A5 (docs/PARITY.md). *** THIS FILE MOVES THE ARM. ***
+//Run with: tools/bringup/run.sh tools/bringup/stage4-parity.txt
+//Clear a 300 mm radius around the base and keep a hand on the power switch.
+//The arm reboots when the script opens the port; it must be in the probe pose (about B90 L46 R66).
+#1 P2200
+#2 M2203 N0
+#3 M2203 N1
+#4 M2203 N2
+//ask Check: #1 about B90 L46 R66, and #2-#4 all "ok V1". If not, press Ctrl-C.
+
+//1. E27 (Q-70): with the base released, a move of L is refused and nothing moves
+#10 M2202 N0
+#11 G2202 N1 V50 F20
+//ask Check: "$11 E27" and L did not move. Press Enter to lock the base again.
+#12 M2201 N0
+#13 P2200
+
+//2. "!" and "~" (Q-71): base 90 -> 130 at F20 (about 1.6 s), held 0.4 s in, then resumed
+& #20 G2202 N0 V130 F20
+//wait 0.4
+//raw !
+//wait 0.5
+#21 M2200
+//ask Check: "ok @9 V0" right after the "!", #21 "ok V1", and the base standing still. Press Enter to resume.
+//raw ~
+//wait 2.5
+#22 P2200
+#23 G2202 N0 V90 F20
+
+//3. Ctrl-X (Q-71): stop during a slow base move. Expect "ok" at once, then "$30 E25" after the brake and the re-sync
+& #30 G2202 N0 V130 F20
+//wait 0.5
+//raw ^X
+//wait 1
+#31 P2200
+#32 M2120 V0.2
+//wait 0.5
+#33 M2121
+//ask Check: "ok" right after Ctrl-X, then "$30 E25"; #31 and the @3 B, L, AR fields agree (B = #31's B - 90). Press Enter.
+#34 G2202 N0 V90 F20
+
+//4. M2124 (Q-72), optional, needs your hand: with M2124 V1, a lost-step stop beeps when the re-sync corrects the base
+//(more than 0.5 deg). Hold the base still by hand while it tries to move; to skip, just don't touch it
+#40 M2124 V1
+//ask Get ready to hold the base. Press Enter, then hold it for about a second.
+#41 G2202 N0 V110 F20
+//ask Check: "@8 N0 V...", "$41 E25" and a short beep (0.26 s) after the arm stopped. Press Enter.
+#42 M2124 V0
+#43 G2202 N0 V90 F20
+#44 P2200
+
+//5. Jogs (A4, Q-76). Each jog would run to 1 deg inside the limits, which are now your measured stops minus 1 deg
+//(Q-83), so 2 deg inside the stops. Still, every jog here is cut short by Ctrl-X after 0.5-0.8 s, in a direction that
+//keeps the effector at or above its height: a full jog to an edge is a separate, later test.
+& #50 G2208 N0 F20
+//wait 0.5
+//raw ^X
+//wait 1
+#51 P2200
+//ask Check: the base turned about 13 deg towards 180, "ok" after Ctrl-X, "$50 E25". Press Enter.
+//The linear jog first finds its edge and checks the path, about 0.5 s on the AVR before it moves, so 0.8 s here
+#56 P2220
+& #52 G2207 N2 F20
+//wait 0.8
+//raw ^X
+//wait 1
+#53 P2220
+//ask Check: the effector rose about 10 mm straight up (#53 against #56: X, Y about the same), "$52 E25". Press Enter.
+#54 G2209
+//ask Check: "$54 ok" and nothing moved (every joint is inside its limits). Press Enter.
+#55 G2206 B90 L46 R66 F20
+
+//6. P2236 (A4, Q-76): the base buttons' pins, V0 = pressed
+#60 P2236 N0
+#61 P2236 N1
+//ask Check: #60 and #61 "ok V1". Now hold the Play button down and press Enter.
+#62 P2236 N1
+//ask Check: #62 "ok V0" (if V1, the Play pin differs on your board: report it). Release the button, press Enter.
+
+//7. Read only (A7, A9 step 1; Q-80, Q-81): the external EEPROM, the AVR's own EEPROM, G2203. Nothing moves or is written
+#70 M2211 N1 A0 T1
+#71 M2211 N1 A65000 T1
+#72 M2211 N0 A900 T1
+#73 G2203
+//ask Check: #70/#71 "ok V<n>" means the board has the external EEPROM (E26: no chip answered; report it). #72 is your work mode. #73 "ok". Press Enter.

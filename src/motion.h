@@ -7,7 +7,7 @@
 // planner works in tally steps; "the current position" for relative moves and missing axes is the end of the queued
 // motion (where the last accepted command will leave the arm).
 //
-// Moves:
+// Moves: refused (E27) while any of the three joints is released, before anything is planned (Q-70).
 //   joint moves (G0, G2202 N0-2, G2206): one straight move in joint space; the target is checked against the joint
 //     limits first (E22 if out of range, nothing moves);
 //   linear moves (G1, G2201, G2204, G2205): a straight line for the effector, cut into joint-space pieces short enough
@@ -28,7 +28,7 @@ enum class Result : uint8_t {
     kOk,
     kBadParam,     // E21
     kUnreachable,  // E22
-    kReleased,     // E25: a joint the move needs is released (M2202)
+    kReleased,     // E27: base, L or R is released (M2202, M2019), whichever joints the move turns (Q-70)
     kNoPosition,   // E26: the boot or re-sync encoder read failed, so the position is unknown
     kChecking,     // a linear move is being checked; ask line_result() on later passes
 };
@@ -55,6 +55,22 @@ Result move_joints(const float a[3], float f);       // L, R, B (user frame) in 
 Result move_xyz(const float xyz[3], bool linear, float f);  // effector frame, mm; NaN = keep that axis (Q-54)
 Result move_xyz_relative(const float dxyz[3], float f);    // G2204
 Result move_polar(float s, float r, float h, bool relative, float f);  // G2201 / G2205
+
+// Jogs (G2207, G2208; V4.10.0 uarm_protocol.c:408-1329, A4): from where the queued motion ends, as far as the joint
+// limits allow, stopping kJogInset inside them. The sign of f is the direction, |f| the speed; f = 0 is kBadParam
+// (Q-73). An edge less than kJogMin away is kUnreachable, as in the original. An L jog from outside the limits is
+// kUnreachable too (R's range moves with L, so there is no straight way back in; G2209 brings the arm inside). The host pauses a jog with S1000 V0 or
+// '!' and ends it with S1100 or Ctrl-X.
+constexpr float kJogInset = 1.0f;  // deg, every limit (the original: 1 deg, the elbow 0..0.4)
+constexpr float kJogMin = 0.7f;    // deg for joint jogs, mm for linear ones (the original's threshold, :1263)
+Result jog_joint(uint8_t axis, float f);  // axis 0 L, 1 R, 2 B: one joint-space move
+Result jog_xyz(uint8_t axis, float f);    // axis 0 X, 1 Y, 2 Z: a linear move; kChecking while the edge is found
+
+// G2209 (V4.10.0 uarm_protocol.c:1331-1440, A4): every joint outside its limit (R: its range at the corrected L)
+// moves to kSettleInset inside it, in one joint-space move from where the queued motion ends; kOk with no move if none is
+// outside. The caller re-syncs from the encoders first.
+constexpr float kSettleInset = 2.0f;
+Result into_limits(float f);
 
 void hold(bool on);  // S1000
 void stop();         // S1100, Ctrl-X

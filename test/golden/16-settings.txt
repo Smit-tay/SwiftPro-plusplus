@@ -54,7 +54,8 @@
 < $17 ok V1
 > #18 P2220
 < $18 ok X241.3509 Y-0.3702 Z12.8754
-> #19 M2400 S9
+#: change Q-76
+> #19 M2400 S12
 < $19 E21
 
 # Saved: after a reboot the mode and its offsets are back.
@@ -184,3 +185,47 @@
 < $54 ok
 > #55 P2206 N3
 < $55 ok V45.0000
+
+# Modes as numbered in V4.10.0 (uarm_common.h:45-58, Pro offsets :141-175; parity A6). S10 and S11 reach modes 10 and
+# 11 (V4.10.0 ran them as S1). 11 = test, front 44.5 height 25.49 (8 up to jss.7); 8 = claw jaw, 0 and 0; 9 and 10
+# as mode 0.
+#: change Q-76
+> #60 M2400 S11
+< $60 ok
+> #61 P2400
+< $61 ok V11
+> #62 P2220
+< $62 ok X169.4117 Y0.0000 Z14.3813
+> #63 M2400 S8
+< $63 ok
+> #64 P2220
+< $64 ok X124.9117 Y0.0000 Z39.8713
+> #65 M2400 S10
+< $65 ok
+> #66 P2220
+< $66 ok X181.5617 Y0.0000 Z-34.6787
+> #67 M2400 S1A
+< $67 E21
+
+# Saved as 10; after a reboot the banner says so.
+~ boot
+#: change Q-76
+< device name : SwiftPro\r
+< soft ver : V5.0.0-pp.1\r
+< api ver : V4.0.5\r
+< work mode : 10\r
+< @1
+~ ms 500
+< @5 V1
+
+# A stored mode beyond 11 (an erased EEPROM reads 255): mode 0 with its defaults (R-7).
+= mode 12
+~ boot
+#: change Q-76 R-7
+< device name : SwiftPro\r
+< soft ver : V5.0.0-pp.1\r
+< api ver : V4.0.5\r
+< work mode : 0\r
+< @1
+~ ms 500
+< @5 V1

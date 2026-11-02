@@ -72,6 +72,39 @@ int main() {
 
     worst = 0;
     for (int i = 0; i < 20; ++i) {
+        start();
+        const bool ok = kin::legal(-13.0f + static_cast<float>(i) * 7.4f, 20.0f, 10.0f, 1.0f);
+        const uint16_t t = stop();
+        if (t > worst) worst = t;
+        sink = ok;
+    }
+    report("kin::legal", worst);
+
+    // An L jog's end (Q-83): up to every table section from end to end, too long for clk/1, so timed at clk/64.
+    TCCR4B = _BV(CS41) | _BV(CS40);
+    worst = 0;
+    // {from L, R, up}: end to end, and along the table's flat stretches, where most sections need the arithmetic.
+    static const float kCases[][3] = {{-13, 15, 1}, {-13, 25, 1}, {-13, 35, 1}, {135, 15, 0}, {135, 25, 0},
+                                      {135, 35, 0}, {45, -4.2f, 1}, {50, -8.3f, 1}, {90, -8.3f, 0}, {-13, 112.2f, 1},
+                                      {-13, 111.8f, 1}, {30, 111.8f, 0}};
+    for (const auto& k : kCases) {
+        start();
+        sink = kin::l_reach(k[0], k[1], k[2] > 0.5f, 1.0f);
+        const uint16_t t = stop();
+        if (t > worst) worst = t;
+    }
+    {
+        char buf[32];
+        fmt::Writer w(buf, sizeof buf);
+        w.put("kin::l_reach ");
+        w.u32(static_cast<uint32_t>(worst) * 4u);  // 64 clocks = 4 us
+        w.put(" us\n");
+        put_s(w.text());
+    }
+    TCCR4B = _BV(CS40);
+
+    worst = 0;
+    for (int i = 0; i < 20; ++i) {
         char buf[24];
         fmt::Writer w(buf, sizeof buf);
         start();

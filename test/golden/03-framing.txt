@@ -29,12 +29,21 @@
 > Q2201
 > 12345
 
-# Q-15: the Grbl realtime bytes ? ! ~ @ are discarded wherever they appear, with no action and no output.
-# (The original removes them too, but acts on them, e.g. "?" prints a Grbl status line.)
+# Q-15: the Grbl realtime bytes ? and @ are discarded wherever they appear, with no action and no output.
+# (The original removes them too, but acts on them: "?" prints a Grbl status line, "@" enters the safety-door state.)
 #: change SP-30 Q-15
 >raw ?
->raw #7 P22!01\n
+>raw #7 P22@01\n
 < $7 ok VSwiftPro
+
+# Q-71: "!" (feed hold) and "~" (resume) are taken out of the stream too, even inside a line, acted on at once and
+# answered without $N, as V4.10.0 does: "ok @9 V0" and "ok".
+#: change Q-71 (V4.10.0 serial.c:350-358)
+>raw #8 P22!01\n
+< ok @9 V0
+< $8 ok VSwiftPro
+>raw ~
+< ok
 
 # Q-22: a line longer than 48 characters (counted after the spaces are removed) is rejected with E21.
 # 48 characters: accepted. M2221 with the joint angles your arm reported in the probe (P2200 #14) gives the

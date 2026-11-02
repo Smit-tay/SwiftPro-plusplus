@@ -25,8 +25,11 @@ It keeps the host contract (nearly 100%) and fixes or improves the rest:
   profiles, linear moves cut by path error, steps rounded instead of truncated, exact final positions.
 - **Closed-loop safety**: the encoders are read continuously; a joint that loses steps or collides stops the arm and is
   reported (`@8`).
+- **Limits from the arm itself**: every joint limit is a stop measured by hand on the arm, minus 1°, with the upper
+  arm's range following the lower arm's angle ([LIMITS.md](docs/LIMITS.md)). The original's limits allowed moves up
+  to 10° past the stops.
 - **Position streaming**: `@3` reports at up to 100 Hz with measured joint angles, timestamps and a sequence counter.
-- **Optional streamed moves** (`M2124 V1`) so multi-point paths blend instead of stopping at every point.
+- **Optional streamed moves** (`M2126 V1`) so multi-point paths blend instead of stopping at every point.
 - **Never blocks**: no busy-waits in the main loop; serial overflow is reported, never silent.
 - Base buttons (`@4`), magnet health checks, per-port replies on all four UARTs, and more. The full list of changes,
   each with its evidence and decision, was kept in the project's issue record during development.
@@ -40,10 +43,10 @@ marked; the rest come from reading the original's source.
 
 | | Original (V4.9.1-jss.7) | SwiftPro++ |
 |---|---|---|
-| Flash (program + initialised data) | 66,060 B (counted from the released hex) | 45,990 B (−30 %) |
-| Static RAM (data + bss) | 5,365 B (measured from the linked image) | 4,088 B (−24 %) |
-| Left for the stack, of 8,192 B | 2,826 B | 4,104 B |
-| Stack actually used | at most about 1 KB (estimate from `-fstack-usage`) | 531 B (measured high-water mark, real image under simavr) |
+| Flash (program + initialised data) | 66,060 B (counted from the released hex) | 51,380 B (−22 %) |
+| Static RAM (data + bss) | 5,365 B (measured from the linked image) | 4,161 B (−22 %) |
+| Left for the stack, of 8,192 B | 2,826 B | 4,085 B |
+| Stack actually used | at most about 1 KB (estimate from `-fstack-usage`) | 545 B (measured high-water mark, real image under simavr) |
 | String constants | copied to RAM | kept in flash |
 
 ### Performance
@@ -51,7 +54,7 @@ marked; the rest come from reading the original's source.
 | | Original | SwiftPro++ |
 |---|---|---|
 | Position report `@3` | the step tally only; no timestamp, no sequence number; skipped reports invisible | up to 100 Hz (measured on the arm: 239 reports in 2.4 s, none lost), plus one joint measured by its encoder per report, its age, a timestamp and a counter that shows any skipped report |
-| Multi-point paths | the arm stops at every point (each move's reply waits for idle) | optional streaming (`M2124 V1`): moves blend through the corners (seen on the arm) |
+| Multi-point paths | the arm stops at every point (each move's reply waits for idle) | optional streaming (`M2126 V1`): moves blend through the corners (seen on the arm) |
 | Acceleration | trapezoidal: acceleration jumps at every start and stop | jerk-limited: acceleration ramps over 40 ms; a stop still lands on the exact step |
 | Linear moves (G1 family) | cut into segments by a rule of length and speed, not of path error; F silently clamped to 100; each move rewrites the acceleration for all later ones | cut by path error (at most 0.02° off the straight line); F as given; acceleration is a separate, saved setting (`M204`) |
 | Kinematics | base angle undefined behind the base; steps truncated (up to one step of bias) | defined everywhere; steps rounded. Inverse kinematics round trip 0.06 µm against 5.9 µm (measured on the AVR's float under simavr) |
@@ -118,7 +121,14 @@ New features:
 
 - **Base buttons:** the Menu and Play buttons report `@4` events.
 - **Encoder detail query:** `P2246` returns each encoder's magnet status, gain and field strength.
-- **Streaming replies:** with `M2124 V1`, a move replies as soon as it is accepted.
+- **Streaming replies:** with `M2126 V1`, a move replies as soon as it is accepted.
+- **From V4.10.0** (uFactory's last release, which the original lacks): moves refused with `E27` while a joint is
+  released; `!` (hold, `ok @9 V0`), `~` (resume, `ok`) and Ctrl-X (stop, `ok`); the position re-read from the
+  encoders after every stop; `M2124 V1` beeps when that re-sync corrects the position; jogs to the edge of the
+  workspace along X, Y or Z (`G2207`) or one joint (`G2208`); `G2209` brings every joint back inside its limits;
+  `P2236` reads a base button; `M2211`/`M2212 N1` read and write the external EEPROM.
+- **From 3.x:** `G2203` (wait for the moves to finish), `M3`/`M5` laser, `M2211 N0` (read the AVR's EEPROM),
+  `M2410 S`, `M2401 B`, `P2245`. See [PARITY.md](docs/PARITY.md).
 - **Lost-step reporting:** `@8`, switchable with `M2125`.
 - **Boot recovery:** a failed boot position read recovers on its own.
 
@@ -201,6 +211,8 @@ The complete command reference, what is kept, changed, added and dropped, is in 
 | [PROTOCOL.md](docs/PROTOCOL.md) | The serial protocol, command by command, with the original's behaviour and this firmware's |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Hardware map with source citations, timers, EEPROM layout, RAM and stack budget, milestone measurements, design records |
 | [HARDWARE-TEST.md](docs/HARDWARE-TEST.md) | Step-by-step plan for the first runs on the arm, and the results |
+| [LIMITS.md](docs/LIMITS.md) | Joint limits: published, in each firmware's code, accepted by commands (host sweep), reachable by hand |
+| [PARITY.md](docs/PARITY.md) | Every feature of every upstream version (V3.x, V4.9.0, V4.10.0) and what this firmware does with it |
 
 ## Status
 
@@ -217,7 +229,7 @@ The complete command reference, what is kept, changed, added and dropped, is in 
   streamed paths, wrist, pump, release and re-lock, lost-step detection
   ([results](docs/HARDWARE-TEST.md#results)). Not yet tried on hardware: the base
   buttons, the gripper, the laser, the limit switch and the stepper end effector.
-- Flash about 46 KB of 248 KB; static RAM 4.1 KB of 8 KB, plus about 530 B of stack (measured).
+- Flash about 54 KB of 248 KB; static RAM 4.1 KB of 8 KB, plus about 540 B of stack (measured).
 
 ## Licence
 

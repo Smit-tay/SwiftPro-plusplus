@@ -118,10 +118,11 @@ Modules, from the bottom layer up. A module only calls modules below it, with on
 
 `app::poll()` → `protocol::poll()`, which does, in this order:
 
-1. **Ctrl-X**: if the RX ISR saw 0x18, stop everything (as `S1100`, without a reply).
+1. **Realtime bytes** (Q-71): Ctrl-X stops everything (as `S1100`), `!` holds, `~` resumes; then their replies
+   (`ok`, `ok @9 V0`, `ok`), each when it fits in the TX ring.
 2. **`commands::poll()`**:
    - one step of encoder work (one I2C transaction, about 0.7 ms);
-   - the recovery after a lost-step stop;
+   - the recovery after a stop (S1100, Ctrl-X, lost steps): once at rest, re-read the locked joints (Q-71);
    - the pump valve sequence, the buzzer timeout, button sampling;
    - limit-switch and power sampling (once per ms);
    - **`motion::poll()`**: one piece of a linear move (check or feed), then refill the stepper ring from `stepgen`.
@@ -140,7 +141,7 @@ Every `poll()` returns whether it made progress. The firmware ignores this. The 
 makes no progress, which is how it knows that simulated time may advance.
 
 Each pass is short. The longest is about 4.5 ms (one linear-move piece: two inverse-kinematics solutions plus a
-planner insert); `@3` formatting is 3.15 ms. The stepper ring holds 40 ms of motion and the USB RX ring 22 ms of input
+planner insert); `@3` formatting is 3.15 ms; an L jog's end (`kin::l_reach`) at most 3.6 ms. The stepper ring holds 40 ms of motion and the USB RX ring 22 ms of input
 at full rate, so the loop never starves the motors or loses bytes in normal operation.
 
 ## 6. Serial input and output
@@ -186,7 +187,7 @@ Handlers parse strictly: unexpected trailing text is `E21` (Q-53).
 
 ## 8. The protocol engine
 
-`protocol` implements the uArm framing: replies `[$N ]<code>[ tail]\n`, with codes `ok`, `E20`–`E26`.
+`protocol` implements the uArm framing: replies `[$N ]<code>[ tail]\n`, with codes `ok`, `E20`–`E27`.
 
 **Async (P and S)** commands run as soon as their line is taken and reply at once. A command that needs encoder reads
 (`P2200`, `P2206`, `P2220`, `P2221`, `P2243`, `P2244`, `P2246`) returns `kPending`; the protocol keeps its sequence
@@ -207,7 +208,7 @@ A sync command can also return `kPending`: a re-sync (`M17`, `M2201`), the whole
 `G2004` delay. No other sync command starts until it finishes, but queries keep being answered.
 
 **Reply gating.** Finished sync replies are sent in FIFO order, and only when `commands::idle()`: motion stopped,
-buzzer silent, final lost-step checks done. With `M2124 V1` (Q-32), a motion command's reply goes out as soon as the
+buzzer silent, final lost-step checks done. With `M2126 V1` (Q-32), a motion command's reply goes out as soon as the
 command was accepted; the host then uses `@9` to know when the arm arrives. A full queue answers the next line `E23`
 at once; the queue counts entries waiting to run and entries waiting to reply.
 
@@ -284,7 +285,8 @@ Each segment is the difference of whole steps from one segment to the next (at m
 - **Hold** (`S1000 V0`) decelerates along the path, across block boundaries if needed, and waits; `V1` resumes.
 - **Stop** (`S1100`, Ctrl-X, a lost-step fault) drops everything and brakes from where the motors actually are, all
   joints together along their current direction, at 3× the acceleration limit (Q-60). There is no smoothing during
-  the stop. The tally stays exact.
+  the stop. The tally stays exact; even so, once at rest every locked joint is re-read from its encoder (Q-71).
+- **Released joints**: every move is refused with `E27` while base, L or R is released (Q-70).
 
 **`stepper`** keeps a ring of 8 precomputed segments `{steps[3], dir, events, period, extra}`; the event period and
 its remainder are worked out when the segment is queued, not in the ISR. On each Timer1 compare the ISR:
@@ -310,7 +312,8 @@ The functions:
 
 - `forward(L, R, base) → arm XYZ`;
 - `inverse(arm XYZ) → L, R, base`: elbow-up, `atan2` plus the law of cosines; unreachable gives NaN;
-- `legal()`: the joint limits (L −20…135.6°, R −20…119.9°, 180 − L − R within 10…151°, base −90…90°);
+- `legal()`: the joint limits (Q-83, LIMITS.md §6): L −13.8…135.6°, base −75.6…72.7° (−90 frame), R within
+  `limit_r(L)`, a table of R's range every 5° of L; `l_reach()` gives an L jog's end along that table;
 - `arm_to_effector` / `effector_to_arm`: the work mode's front and height offsets;
 - steps ↔ angles, rounded to the nearest step (R-1).
 

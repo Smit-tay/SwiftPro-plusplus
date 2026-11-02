@@ -43,7 +43,7 @@ uint8_t entry(uint8_t pin) {
 
 // Pins the firmware drives (Q-17, docs/ARCHITECTURE.md §2): arm STEP/DIR/EN PF0 PF1 PF2 PF6 PF7 PL1 PL3 PK0 PD7, micro-step
 // PK2-PK4, encoder I2C PC1 PC3 (PH2, PH7, PD5, PD6 have no Arduino number), USART0-3 PE0 PE1 PD2 PD3 PH0 PH1 PJ0 PJ1,
-// wrist PH3, buzzer PL5.
+// wrist PH3, buzzer PL5, external EEPROM I2C PB6 PB7 (Arduino 12, 13; parity A9, Q-81).
 #if defined(__AVR__)
 const uint8_t kOwned[] PROGMEM = {
 #else
@@ -52,7 +52,7 @@ const uint8_t kOwned[] = {
     P('F', 0), P('F', 1), P('F', 2), P('F', 6), P('F', 7), P('L', 1), P('L', 3), P('K', 0), P('D', 7),
     P('K', 2), P('K', 3), P('K', 4), P('C', 1), P('C', 3),
     P('E', 0), P('E', 1), P('D', 2), P('D', 3), P('H', 0), P('H', 1), P('J', 0), P('J', 1),
-    P('H', 3), P('L', 5),
+    P('H', 3), P('L', 5), P('B', 6), P('B', 7),
 };
 // In work modes 4/5, also the effector stepper's DIR PH5, STEP PH6 and origin switch PK5 (uarm_peripheral.c:61-63, 148).
 constexpr uint8_t kOwnedStepper[] = {P('H', 5), P('H', 6), P('K', 5)};

@@ -25,7 +25,7 @@ void sim_reset();
 // Keys and values, all text:
 //   hw          V3.3.0 | V3.3.1 | V3.3.2 | V0.0.0       hardware straps on PJ3-PJ6        default V3.3.1
 //   uid         <12 characters> | none (erased)        BLE UID in EEPROM 1002            default 000000000000
-//   mode        0-8                                    work mode in EEPROM 900           default 0
+//   mode        0-255                                  work mode in EEPROM 900           default 0
 //   enc.ref     B<n> L<n> R<n>                         reference counts (EEPROM 818/820) default B0 L0 R0
 //   enc.raw     B<n> L<n> R<n>                         raw AS5600 counts now             default B0 L0 R0
 //   enc.status  B<n> L<n> R<n>                         AS5600 STATUS register (0x0B)     default 32 each (MD only)
@@ -39,6 +39,7 @@ void sim_reset();
 //   button      menu|play down|up                      base button level                  default up
 //   tool.switch 0 | 1                                  stepper effector origin switch PK5 default 0 (open)
 //   pin.<P><b>  0 | 1, e.g. pin.A0 1                   external level on port P bit b     default 0
+//   xeeprom     present | absent                       the external EEPROM at 0xA0 (bus X) default present, erased
 // While the motors move, encoders follow the step tally exactly (rounded to the nearest count),
 // except a stalled encoder, which keeps its last value.
 bool sim_set(std::string_view key, std::string_view value);

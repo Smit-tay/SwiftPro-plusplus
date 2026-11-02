@@ -51,7 +51,7 @@ struct Result {
 
 const char* const kKeys[] = {"hw",    "uid",   "mode",  "enc.ref",  "enc.raw",     "enc.status", "enc.nack",
                              "enc.stall", "enc.slip", "power", "limit", "pump.adc", "gripper.pa0", "button",
-                             "tool.switch"};
+                             "tool.switch", "xeeprom"};
 
 bool starts_with(const std::string& s, const char* p) { return s.rfind(p, 0) == 0; }
 

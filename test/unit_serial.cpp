@@ -39,13 +39,19 @@ void test_serial() {
     rx("#1 P2201\n");
     CHECK(drain_rx() == "#1 P2201\n");
 
-    // Q-15: '?' '!' '~' '@' are dropped wherever they are. Ctrl-X is a stop request, not data (Q-48).
-    CHECK(!serial::take_stop_request());
+    // Q-15, Q-71: realtime bytes never reach the line, wherever they are. '?' and '@' are dropped; Ctrl-X (Q-48),
+    // '!' and '~' are handed over once each, per port; of '!' and '~' the last one wins.
+    CHECK(serial::take_realtime(0) == 0);
     rx("#2 P22?0!1~@\n");
     serial::on_rx(0, 0x18);
     CHECK(drain_rx() == "#2 P2201\n");
-    CHECK(serial::take_stop_request());
-    CHECK(!serial::take_stop_request());
+    CHECK(serial::take_realtime(0) == (serial::kRtStop | serial::kRtHold | serial::kRtResume));
+    CHECK(!serial::hold_last());
+    CHECK(serial::take_realtime(0) == 0);
+    serial::on_rx(2, '!');
+    CHECK(serial::take_realtime(0) == 0);
+    CHECK(serial::take_realtime(2) == serial::kRtHold);
+    CHECK(serial::hold_last());
 
     // RX overflow (SP-01): data stops at 253 bytes, keeping 2 free. The rest of that line is dropped, and its line
     // end goes in with the lost-bytes marker in front, so the damaged line is reported, not executed.

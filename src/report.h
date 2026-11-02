@@ -42,6 +42,7 @@ void skip();                     // a due report that didn't fit (Q-21)
 void set_button_reports(bool on);  // M2213 V0 = on
 void poll_buttons();               // every main-loop pass; samples on the 10 ms tick
 bool button_event(fmt::Writer& out);  // writes "@4 N<b> V<e>" if one is waiting
+bool button_down(uint8_t button);     // 0 Menu, 1 Play: the pin now, not debounced (P2236)
 
 #if !defined(__AVR__)
 void host_set_button(uint8_t button, bool pressed);  // 0 Menu, 1 Play

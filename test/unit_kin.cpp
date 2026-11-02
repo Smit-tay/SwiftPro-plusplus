@@ -62,7 +62,7 @@ void test_kin() {
     std::ifstream in("test/data/kin.txt");
     CHECK(static_cast<bool>(in));
     std::string line;
-    int rows = 0, bad = 0, legal_differs = 0, step_differs = 0;
+    int rows = 0, bad = 0, legal_differs = 0, legal_vs_original = 0, step_differs = 0;
     Stats fk, ik, other;
     const kin::Offsets off{56.65f, 74.55f};
     while (std::getline(in, line)) {
@@ -89,7 +89,7 @@ void test_kin() {
             ok = close(fk, bits(o[6]), x, 1e-3, behind) && ok;
             ok = close(fk, bits(o[7]), y, 1e-3, behind) && ok;
             ok = close(fk, bits(o[8]), z, 1e-3) && ok;
-            if ((o[9] == "1") != kin::legal(a, b, c)) ++legal_differs;
+            if ((o[9] == "1") != kin::legal(a, b, c)) ++legal_vs_original;  // Q-83: other limits, by design
         } else if (kind == "C") {
             kin::inverse(a, b, c, &x, &y, &z);
             const float oa = bits(o[0]), ob = bits(o[1]), oc = bits(o[2]);
@@ -116,7 +116,7 @@ void test_kin() {
             ok = close(other, bits(o[2]), kin::arm_angle(a, b), 1e-4) && ok;
             ok = close(other, bits(o[3]), kin::base_angle(a, c), 1e-4) && ok;
         } else {
-            if ((o[0] == "1") != kin::legal(a, b, c)) ++legal_differs;
+            if ((o[0] == "1") != kin::legal(a, b, c)) ++legal_vs_original;
         }
         ++rows;
         if (!ok && ++bad <= 5) std::printf("kin row: %s\n", line.c_str());
@@ -126,9 +126,9 @@ void test_kin() {
     CHECK(legal_differs == 0);
     CHECK(fk.nan_mismatch == 0 && ik.nan_mismatch == 0);
     std::printf("kin vs original: FK worst %.2g (text differs %d/%d), IK worst %.2g (text differs %d/%d), "
-                "steps off by more than 1: %d/1600, step angles worst %.2g\n",
+                "steps off by more than 1: %d/1600, step angles worst %.2g; legality differs (Q-83 limits) %d\n",
                 fk.worst, fk.text_differs, fk.values, ik.worst, ik.text_differs, ik.values, step_differs,
-                other.worst);
+                other.worst, legal_vs_original);
     CHECK(step_differs == 0);
 
     // Your arm, probe 2026-10-17: P2242 refs B1655 L2673 R1664, P2243 raw B1654 L2820 R1403 gave
@@ -142,4 +142,79 @@ void test_kin() {
     kin::forward(l, r, base - 90.0f, &px, &py, &pz);  // P2220 passes base - 90 (uarm_protocol.c:1426)
     kin::arm_to_effector(off, &px, &py, &pz);
     CHECK(f4(px) == "233.6009" && f4(py) == "-0.3583" && f4(pz) == "-10.6346");
+}
+
+// The joint limits (Q-83, docs/LIMITS.md section 6): this copy of the table must match kin.cpp's, the limits must lie
+// inside the original's everywhere (never outside COMMANDABLE), the region must have no dents, and an L jog must end
+// where a fine walk along L does.
+void test_limits() {
+    static const float kTable[32][3] = {  // L, R min, R max: docs/LIMITS.md section 6
+        {-15, 56, 112}, {-10, 51, 112}, {-5, 46, 112}, {0, 41, 112},    {5, 36, 112},   {10, 31, 112},  {15, 26, 112},
+        {20, 21, 112},  {25, 16, 111},  {30, 11, 110}, {35, 6, 109},    {40, 1, 108},   {45, -4, 106},  {50, -8, 104},
+        {55, -12, 102}, {60, -16, 100}, {65, -18, 98}, {70, -18, 94},   {75, -18, 90},  {80, -18, 86},  {85, -18, 82},
+        {90, -18, 78},  {95, -18, 73},  {100, -18, 68}, {105, -18, 63}, {110, -18, 58}, {115, -18, 53}, {120, -18, 48},
+        {125, -18, 43}, {130, -18, 38}, {135, -18, 33}, {140, -18, 28},
+    };
+    // No dents: R min convex and R max concave in L, so a straight joint-space move between two legal poses stays legal.
+    for (int i = 1; i < 31; ++i) {
+        CHECK(kTable[i - 1][1] + kTable[i + 1][1] - 2 * kTable[i][1] >= 0);
+        CHECK(kTable[i - 1][2] + kTable[i + 1][2] - 2 * kTable[i][2] <= 0);
+    }
+    constexpr float e = 0.05f;
+    for (const auto& t : kTable) {
+        const kin::Range r = kin::limit_r(t[0]);
+        CHECK(std::fabs(r.lo - t[1]) < 1e-4f && std::fabs(r.hi - t[2]) < 1e-4f);
+        if (t[0] < kin::kLimitL.lo || t[0] > kin::kLimitL.hi) continue;
+        CHECK(kin::legal(t[0], t[1] + e, 0.0f) && !kin::legal(t[0], t[1] - e, 0.0f));
+        CHECK(kin::legal(t[0], t[2] - e, 0.0f) && !kin::legal(t[0], t[2] + e, 0.0f));
+    }
+    const kin::Range mid = kin::limit_r(47.5f);  // halfway between the L 45 and 50 points
+    CHECK(std::fabs(mid.lo + 6.0f) < 1e-4f && std::fabs(mid.hi - 105.0f) < 1e-4f);
+    CHECK(kin::legal(-13.8f + e, 60.0f, 0.0f) && !kin::legal(-13.8f - e, 60.0f, 0.0f));
+    CHECK(kin::legal(135.6f - e, 20.0f, 0.0f) && !kin::legal(135.6f + e, 20.0f, 0.0f));
+    CHECK(kin::legal(90.0f, 30.0f, -95.0f + e) && !kin::legal(90.0f, 30.0f, -95.0f - e));  // user frame -5
+    CHECK(kin::legal(90.0f, 30.0f, 95.0f - e) && !kin::legal(90.0f, 30.0f, 95.0f + e));    // user frame 185
+    CHECK(kin::legal(45.6789f, 66.0411f, -0.0879f));  // your probe pose, 2026-10-17
+    CHECK(!kin::legal(-14.3f, 80.0f, 0.0f));          // f01e691's taught L: now 0.5 deg from the stop
+    CHECK(!kin::legal(std::nanf(""), 60.0f, 0.0f) && !kin::legal(60.0f, std::nanf(""), 0.0f));
+
+    // Inside the original's limits everywhere (L -4..135.6 aside: ours reaches -13.8 as jss.7's -20 did).
+    int outside = 0;
+    for (float a = kin::kLimitL.lo; a <= kin::kLimitL.hi; a += 0.05f) {
+        const kin::Range r = kin::limit_r(a);
+        if (r.lo < -20.0f || r.hi > 119.9f || 180.0f - a - r.hi < 10.0f || 180.0f - a - r.lo > 151.0f) ++outside;
+    }
+    CHECK(outside == 0);
+
+    // l_reach against a walk along L in 0.01 deg steps, from a grid of starts, both ways.
+    int starts = 0, differs = 0;
+    double worst = 0.0;
+    for (float a = kin::kLimitL.lo; a <= kin::kLimitL.hi; a += 3.7f) {
+        for (float b = -18.0f; b <= 114.0f; b += 2.9f) {
+            if (!kin::legal(a, b, 0.0f)) {
+                CHECK(kin::l_reach(a, b, true, 1.0f) == a && kin::l_reach(a, b, false, 1.0f) == a);
+                continue;
+            }
+            for (int up = 0; up < 2; ++up) {
+                const float step = up ? 0.01f : -0.01f;
+                float want = a;
+                for (int n = 1;; ++n) {
+                    const float x = a + step * static_cast<float>(n);
+                    if (!kin::legal(x, b, 0.0f)) break;
+                    if (kin::legal(x, b, 0.0f, 1.0f)) want = x;
+                }
+                const float got = kin::l_reach(a, b, up != 0, 1.0f);
+                const double d = std::fabs(static_cast<double>(got) - static_cast<double>(want));
+                if (d > worst) worst = d;
+                if (d > 0.011) {
+                    if (++differs <= 5) std::printf("l_reach(%g, %g, %d) = %g, walk %g\n", static_cast<double>(a), static_cast<double>(b), up,
+                                static_cast<double>(got), static_cast<double>(want));
+                }
+                if (got != a) CHECK(kin::legal(got, b, 0.0f, 0.999f));
+                ++starts;
+            }
+        }
+    }
+    std::printf("limits: l_reach vs walk, %d starts, worst %.3g deg\n", starts, worst);
+    CHECK(differs == 0);
 }

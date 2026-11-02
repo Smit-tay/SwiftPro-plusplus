@@ -12,6 +12,7 @@ void test_parse();
 void test_serial();
 void test_fmt();
 void test_kin();
+void test_limits();
 void test_motion();
 void test_watch();
 
@@ -21,6 +22,7 @@ int main() {
     test_serial();
     test_fmt();
     test_kin();
+    test_limits();
     test_motion();
     test_watch();
     if (g_failures != 0) {

@@ -30,13 +30,27 @@
 > #8 M17
 < $8 ok
 
-# Ctrl-X (0x18) acts like S1100 but has no reply of its own (Q-48).
-#: change Q-15 Q-48
+# Ctrl-X (0x18) acts like S1100 and replies "ok" without $N, as V4.10.0 (Q-48, Q-71). After every stop the locked
+# joints are re-read from their encoders once the arm is at rest (Q-71); replies wait for that.
+#: change Q-15 Q-48 Q-71 (V4.10.0 serial.c:364-385)
 > #6 G2202 N0 V120 F200
 ~ ms 300
 >raw \x18
+< ok
 ~ idle
 < $6 E25
+
+# "!" holds a move ("ok @9 V0" at once, as V4.10.0), "~" resumes it ("ok"); the move then ends normally.
+#: change Q-71 (V4.10.0 serial.c:350-358)
+> #9 G2202 N0 V40 F50
+~ ms 300
+>raw !
+< ok @9 V0
+~ ms 2000
+>raw ~
+< ok
+~ idle
+< $9 ok
 
 # The firmware is idle and accepts new commands.
 #: change SP-05 Q-4

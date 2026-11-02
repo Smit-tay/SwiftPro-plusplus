@@ -47,7 +47,8 @@ Consequences:
   original's exact bits can't be reproduced without copying its expression order, the port matches it within a
   stated tolerance, and every difference that could show in a 4-decimal reply is reported.
 - What is dropped is unchanged: spindle, coolant, probe, homing, limits, control pins, safety door, check mode, arcs,
-  dwell, coordinate systems, G28/G30/G92, startup lines, `$` commands and settings, realtime `? ! ~ @`, Grbl messages, the Arduino core, CoreXY and other machine variants.
+  dwell, coordinate systems, G28/G30/G92, startup lines, `$` commands and settings, realtime `? @` (Ctrl-X, `!`, `~`
+  kept, Q-15/Q-48/Q-71), Grbl messages, the Arduino core, CoreXY and other machine variants.
 
 ## 2. Hardware map (VERIFIED, extracted from the original; nothing invented)
 
@@ -79,7 +80,7 @@ Consequences:
 | L | PC1 | PC3 | `uarm_iic.c:4-12` |
 | R | PH2 | PH7 | `:20-28` |
 | Base | PD5 | PD6 | `:36-44` |
-| (external user EEPROM 0xA0) | PB7 | PB6 | `:53-62` (drop, Q-18) |
+| External user EEPROM 0xA0 (`i2c::Bus::kX`) | PB7 | PB6 | `:53-62` (V4.10.0); built for `M2211`/`M2212 N1` and learning mode (Q-81). SDA also has the internal pull-up: the board's are UNVERIFIED |
 
 Address 0x36. ANGLE register 0x0E/0x0F, read as two separate single-byte transactions. STATUS register 0x0B
 (`uarm_angle.c:60-88`). Bit time about 15 µs (~65 kHz), using `delay_us` (`uarm_iic.c:250-730`). Angle =
@@ -99,10 +100,26 @@ pointB = L 32.758930, R 88.980537, base 90.0 (`uarm_angle.c:33-41,136-232`).
 | Motor power sense | ADC A5 = PF5 | none (polled every 256 loops) | `@5`, P2234 | yes (on_power) | keep; poll on the tick (e.g. every 50 ms) |
 | Hardware version straps | PJ3–PJ6 in | none | P2202; selects `$3` and the pump valve mode | yes (device info) | keep |
 | Stepper end effector (work modes 4/5) | DIR PH5, STEP PH6, origin switch PK5 (pull-up) | Timer4 OVF ISR every 192 µs (time4 reload 3×64 µs) | M2400 S4/S5, G2202 N3, M2412, P2206 N3 | no | keep (Q-14): **Timer3** CTC ISR + non-blocking origin state machine; untested on hardware |
-| Work modes 0–8 | n/a | n/a | M2400, P2400 | yes (set_mode) | keep the offsets table (`uarm_common.h:115-139`); 4/5 per Q-14 |
-| Raw IO | any Arduino pin 0–69 | n/a | M2240, M2241, P2240, P2241 | yes (ROS services) | allowlist  |
+| Work modes 0–11 (V4.10.0 numbering, Q-76) | n/a | n/a | M2400, P2400 | yes (set_mode) | built: the offsets table (`uarm_common.h:141-175` in V4.10.0); 4/5 per Q-14 |
+| Raw IO | any Arduino pin 0–69 | n/a | M2240, M2241, P2240, P2241 | yes (ROS services) | allowlist (SP-32, Q-17) |
 | USART1–3 | PD2/PD3, PH0/PH1, PJ0/PJ1 | RX/UDRE ISRs | all commands | Bluetooth (which USART: UNVERIFIED) | keep all; RX pull-ups on (Q-16) |
-| LED effects, buttons, camera | **not present in this firmware** (VERIFIED by grep) | | | | none |
+| Base buttons Menu PE7, Play PE6 (pull-ups) | not in jss.7; V4.10.0 `uarm_peripheral.c:931-962` | none (polled) | `@4`, `M2213` | none | **built** (SP-44): 10 ms samples, `@4` click / long press. `P2236`: see PARITY.md |
+| LED effects, camera | **not present in this firmware** (VERIFIED by grep) | | | | none; LED design in §2.4 (A10) |
+
+### 2.4 Design, not built: the board's unused hardware (parity A10)
+
+These are on the board but unused by jss.7 and V4.x. The pins come from 3.x (`uarm-v3.1.18-dev/lib/Marlin/
+pins_Swift.h:75-90`, `uArmService.cpp:640-697`, `uArmAPI.cpp:1091-1094`) and from your schematic notes. Each is
+UNVERIFIED on your board until a read-only probe confirms it. Nothing here is built; each item would come to you as a
+proposal.
+
+| Hardware | Pins | Design |
+|---|---|---|
+| RGB LED | R PE4 = OC3B, G PE5 = OC3C, B PE3 = OC3A (Arduino 2, 3, 5) | Hardware PWM on Timer3, 8-bit fast PWM ÷64 (976 Hz), no ISR. One new command (a number unused by every upstream version, as `M2126`) taking R, G, B 0–255; a learning-mode colour scheme like 3.x's. The probe: drive each pin high in turn at the arm |
+| Timer for the stepper effector (modes 4/5) | — | Free Timer3 for the LED by moving the effector's step ISR to **Timer2** (free since the buzzer moved to Timer5, SP-24): CTC, ÷64, OCR2A = 47 gives today's 192 µs. One cost: Timer2's vector (13) outranks Timer1's (17, the arm's steps), where Timer3's (32) does not. AVR interrupts don't nest, so this only decides which of two pending ISRs runs first; an arm step can be late by at most one effector ISR (its length is to be measured under simavr before building). About 30 lines in `tool.cpp`; the effector is untested on hardware either way |
+| Wrist servo feedback | PF3 = ADC3 (`SERVO_HAND_ROT_ANALOG_PIN`) | Read at 10 Hz from the existing ADC module. A two-point calibration (commanded 0° and 180°, raw values saved in free EEPROM) turns it into an angle. Uses: `P2206 N3` could report the measured angle (now the commanded one, Q-12); learning mode could record the wrist when it is moved by hand; a servo that doesn't follow could be reported like `@8`. `P2241 N3` already gives the raw value, so a probe needs no new code |
+| BT_STATE | PE2, input (high = a BLE host is connected) | 3.x moved all replies to USART1 while it was high. We reply on the port each command came from, so no switching is needed. Design: an event when it changes, and a query; both cheap |
+| SW_STATE | PB5 (Arduino 11), input with pull-up; low = gripper | 3.x used it in learning mode to choose the gripper over the pump. PB5 is OC1A, but Timer1 runs without outputs, so the pin is free. Design: a query, and the choice in learning mode (A9) |
 
 The "nine work modes" are the `uarm_work_mode_e` enum 0–8 (`uarm_common.h:50-60`). Each sets the front and height
 offsets of the effector; only modes 4/5 change hardware behaviour (they select the stepper effector).
@@ -299,6 +316,10 @@ once and verify output (it is safe, and prints only).
 | 5b. `@3` report, buttons, lost-step watch, M2125 (2026-10-18) | 42,504 B | 4,000 B | ≈ 460 B (est.) | Deepest chain now the report: `protocol::poll` 74 → `send_report` 171 (its 160 B line buffer; not inlined, so it stays off the motion chain) → `report::write` 55 → `fmt::f4` 57 → `dtostrf` ≈ 40 (UNVERIFIED) + returns ≈ 410 B, plus one ISR ≈ 50 B (`-fstack-usage`, no LTO). Report formatting 3.15 ms (measured, simavr) |
 | simavr full-image test (2026-10-18) | 41,890 B | 3,992 B | **528 B measured** | `tools/simavr`: the real ELF with emulated AS5600s on the encoder pins, UART, step/dir counting, stack painted from `__bss_end`. 14.4 s session: boot, identity, encoder queries, joint, Cartesian and linear moves (exact step counts), `@3`, `S1100`, lost steps, buzzer, wrist, release. High-water mark 528 B (the estimate was ≈ 460 B). R-16 applied |
 | 5c. pins, work modes and offsets, M2401, M2205, stepper end effector (2026-10-18) | 45,580 B | 4,088 B | **527 B measured** | Effector stepper on Timer3 (CTC clk/64, OCR3A 47: 192 µs half steps, as the original). Mode offset table and owned-pin list in flash. The simavr session covers pins and the effector (exact step counts) |
+| Parity A1, A2, A5 (2026-10-19): `E27`, `!` `~` Ctrl-X replies, re-sync after every stop, `M2124` beep, streaming on `M2126` | 46,654 B | 4,107 B | **539 B measured** | From 45,990 B / 4,088 B / 531 B before. RAM: 4 B realtime bits, 4 B pending replies, flags. Stack +8 B. The simavr session now sends Ctrl-X, `!`, `~` and a move with the joints released (new `>raw` directive) |
+| Parity A4, A6 (2026-10-21): `G2207`/`G2208` jogs, `G2209` back inside the limits, `P2236`; the joint limits in one table (`kin.h`); modes 0–11 | 49,752 B | 4,137 B | **545 B measured** | +3,098 B flash (A6: 52 B), +30 B RAM, +6 B stack. Same limit values; `kin::legal` takes an inset. Flash 19.6% |
+| Parity A7, A9 step 1 (2026-10-21): 3.x commands (`G2203`, `M3`/`M5`, `M2211 N0`, `M2410 S`, `M2401 B`, `P2245`); the external EEPROM bus and `M2211`/`M2212 N1` | 51,380 B | 4,161 B | **545 B measured** | +1,628 B flash, +24 B RAM. Fourth I2C bus on PB7/PB6 (`xeeprom.cpp`); the simulator models the chip |
+| Measured joint limits (2026-10-21, Q-82, Q-83, [LIMITS.md](LIMITS.md) §6): L and base ranges, R's range per 5° of L in a flash table, `kin::limit_r`, `kin::l_reach` for the L jog | 54,080 B | 4,145 B | **542 B measured** | +2,700 B flash (the table 128 B; the rest is `limit_r`, the L jog's section arithmetic, and inlining), −16 B RAM. `kin::legal` 0.29 ms, `l_reach` 3.6 ms worst (simavr profile). Flash 21.3% |
 
 Stack measurement: `-fstack-usage` per function plus a manual call-graph sum for the deepest chains, and a paint
 pattern from the end of `.bss` to SP at boot. A debug build reports the high-water mark (a debug-only `P` command,

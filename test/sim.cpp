@@ -91,6 +91,22 @@ As5600& chip(i2c::Bus b) {
     return chips[j];
 }
 
+// External EEPROM model (bus X, xeeprom.h): 64 KiB at 0xA0, two address bytes, 128-byte pages that wrap, a 5 ms
+// write cycle after STOP during which the chip doesn't ACK. Reads auto-increment across the whole array.
+struct Eeprom {
+    bool present = true;
+    uint8_t mem[65536];
+    uint8_t phase = 0;  // 0 device address, 1 address high, 2 address low, 3 data
+    bool reading = false;
+    uint16_t pointer = 0;
+    uint8_t page[128];
+    uint8_t pending = 0;  // data bytes received in this write
+    uint32_t busy_until = 0;
+};
+Eeprom xrom;
+
+bool xrom_busy() { return tick::now_ms() < xrom.busy_until; }
+
 // sim key letter -> bus
 int bus_of(char letter) { return letter == 'L' ? 0 : letter == 'R' ? 1 : letter == 'B' ? 2 : -1; }
 
@@ -127,6 +143,11 @@ void defaults() {
         if (l != 'I') pins::host_port(l) = pins::HostPort{};
     report::host_set_button(1, false);
     for (As5600& c : chips) c = As5600{};
+    xrom.present = true;
+    std::memset(xrom.mem, 0xFF, sizeof xrom.mem);
+    xrom.phase = 0;
+    xrom.pending = 0;
+    xrom.busy_until = 0;
     for (uint8_t j = 0; j < 3; ++j) {
         follow[j] = Follow{};
         set_raw(j, 0);
@@ -182,20 +203,51 @@ bool is_joint_triple(std::string_view s, long lo, long hi) {
 
 }  // namespace
 
-// The i2c bus functions, implemented by the AS5600 model.
+// The i2c bus functions, implemented by the AS5600 model and, on bus X, the EEPROM model.
 namespace i2c {
 void init() {}
 void start(Bus b) {
+    if (b == Bus::kX) {
+        xrom.phase = 0;
+        return;
+    }
     As5600& c = chip(b);
     c.expect_address = true;
     c.expect_pointer = false;
 }
 void stop(Bus b) {
+    if (b == Bus::kX) {
+        if (xrom.pending > 0) {  // commit the page write: the address wraps within its page
+            const uint16_t base = static_cast<uint16_t>(xrom.pointer & ~0x7F);
+            for (uint8_t i = 0; i < xrom.pending; ++i)
+                xrom.mem[base + ((xrom.pointer + i) & 0x7F)] = xrom.page[i];
+            xrom.pending = 0;
+            xrom.busy_until = tick::now_ms() + 5;
+        }
+        xrom.phase = 0;
+        return;
+    }
     As5600& c = chip(b);
     c.expect_address = false;
     c.expect_pointer = false;
 }
 bool write(Bus b, uint8_t byte) {
+    if (b == Bus::kX) {
+        if (!xrom.present) return false;
+        switch (xrom.phase) {
+            case 0:
+                if ((byte & 0xFE) != 0xA0 || xrom_busy()) return false;
+                xrom.reading = (byte & 1) != 0;
+                xrom.phase = xrom.reading ? 3 : 1;
+                return true;
+            case 1: xrom.pointer = static_cast<uint16_t>(byte << 8); xrom.phase = 2; return true;
+            case 2: xrom.pointer = static_cast<uint16_t>(xrom.pointer | byte); xrom.phase = 3; return true;
+            default:
+                if (xrom.pending < sizeof xrom.page) xrom.page[xrom.pending] = byte;
+                ++xrom.pending;
+                return true;
+        }
+    }
     As5600& c = chip(b);
     if (c.nack) return false;
     if (c.expect_address) {
@@ -212,6 +264,7 @@ bool write(Bus b, uint8_t byte) {
     return true;
 }
 uint8_t read(Bus b, bool) {
+    if (b == Bus::kX) return xrom.present ? xrom.mem[xrom.pointer++] : 0xFF;
     As5600& c = chip(b);
     if (c.nack) return 0xFF;  // nobody drives SDA: the pull-up reads 1
     return c.reg(c.pointer++);
@@ -243,8 +296,13 @@ bool sim_set(std::string_view key, std::string_view value) {
         std::memcpy(nvm::host_image() + nvm::kBleUid, value.data(), nvm::kBleUidLength);
         return true;
     }
+    if (key == "xeeprom") {  // present | absent
+        if (value != "present" && value != "absent") return false;
+        xrom.present = value == "present";
+        return true;
+    }
     if (key == "mode") {
-        if (!is_int(value, 0, 8)) return false;
+        if (!is_int(value, 0, 255)) return false;
         nvm::host_image()[nvm::kWorkMode] = static_cast<uint8_t>(std::atoi(std::string(value).c_str()));
         return true;
     }

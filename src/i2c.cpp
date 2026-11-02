@@ -23,13 +23,15 @@ struct Pins {
     volatile uint8_t& pin;
     uint8_t sda;
     uint8_t scl;
+    bool pullup;  // released SDA also has the internal pull-up (the EEPROM bus)
 };
 
 Pins pins(Bus b) {
     switch (b) {
-        case Bus::kL: return {DDRC, PORTC, PINC, _BV(PC1), _BV(PC3)};  // uarm_iic.c:5-14
-        case Bus::kR: return {DDRH, PORTH, PINH, _BV(PH2), _BV(PH7)};  // uarm_iic.c:21-30
-        default: return {DDRD, PORTD, PIND, _BV(PD5), _BV(PD6)};      // uarm_iic.c:37-46
+        case Bus::kL: return {DDRC, PORTC, PINC, _BV(PC1), _BV(PC3), false};  // uarm_iic.c:5-14
+        case Bus::kR: return {DDRH, PORTH, PINH, _BV(PH2), _BV(PH7), false};  // uarm_iic.c:21-30
+        case Bus::kX: return {DDRB, PORTB, PINB, _BV(PB7), _BV(PB6), true};   // V4.10.0 uarm_iic.c:53-68
+        default: return {DDRD, PORTD, PIND, _BV(PD5), _BV(PD6), false};      // uarm_iic.c:37-46
     }
 }
 
@@ -43,9 +45,16 @@ void clear(volatile uint8_t& r, uint8_t m) {
     r = static_cast<uint8_t>(r & ~m);
 }
 
-// Open drain: low = output with PORT 0; high = input, the pull-up raises the line.
-void sda_low(const Pins& p) { set(p.ddr, p.sda); }
-void sda_release(const Pins& p) { clear(p.ddr, p.sda); }
+// Open drain: low = output with PORT 0; high = input, the pull-up raises the line. With the internal pull-up, PORT
+// is 1 only while the pin is an input, so SDA is never driven high.
+void sda_low(const Pins& p) {
+    if (p.pullup) clear(p.port, p.sda);
+    set(p.ddr, p.sda);
+}
+void sda_release(const Pins& p) {
+    clear(p.ddr, p.sda);
+    if (p.pullup) set(p.port, p.sda);
+}
 bool sda_read(const Pins& p) { return (p.pin & p.sda) != 0; }
 void scl_high(const Pins& p) { set(p.port, p.scl); }
 void scl_low(const Pins& p) { clear(p.port, p.scl); }
@@ -53,9 +62,9 @@ void scl_low(const Pins& p) { clear(p.port, p.scl); }
 }  // namespace
 
 void init() {
-    for (uint8_t i = 0; i < 3; ++i) {
+    for (uint8_t i = 0; i < kBuses; ++i) {
         const Pins p = pins(static_cast<Bus>(i));
-        clear(p.port, p.sda);  // SDA's PORT bit stays 0 for good: only DDR moves it
+        clear(p.port, p.sda);  // SDA's PORT bit stays 0 (or follows DDR, with the pull-up): DDR moves it
         sda_release(p);
         scl_high(p);
         set(p.ddr, p.scl);

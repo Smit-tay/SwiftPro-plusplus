@@ -16,6 +16,7 @@
 #include "stepper.h"
 #include "tick.h"
 #include "tool.h"
+#include "xeeprom.h"
 
 #include <math.h>
 #include <string.h>
@@ -34,16 +35,19 @@ namespace {
 uint8_t mode = 0;                          // EEPROM 900, one byte (faithful uarm_peripheral.c:333-338)
 char uid[nvm::kBleUidLength + 1] = {};     // EEPROM 1002, 12 bytes (faithful uarm_peripheral.c:367-372)
 bool motion_done_report = false;           // M2122: report @9 when a move ends
-bool stream = false;                       // M2124 (Q-32)
+bool stream = false;                       // M2126 (Q-32, Q-72)
+bool resync_beep = false;                  // M2124 (Q-72)
+constexpr float kResyncBeepDeg = 0.5f;     // a re-sync that corrects more than this beeps (uarm_peripheral.c:1046)
 kin::Offsets offsets{};                    // EEPROM 920 / 910 (uarm_peripheral.c:340-352)
 constexpr float kDefaultFront = 56.65f;    // mode 0 defaults (uarm_common.h:116-117)
 constexpr float kDefaultHeight = 74.55f;
-// Default offsets {height, front} per work mode, for M2400 (the Swift Pro block, uarm_common.h:116-138). Mode 7 (user)
-// reads EEPROM 930/940 instead.
+// Default offsets {front, height} per work mode, for M2400: V4.10.0's numbering and Swift Pro values (uarm_common.h:45-58,
+// 141-175; parity A6, Q-76). Mode 7 (user) reads EEPROM 930/940 instead. Up to jss.7, 8 was the test mode.
+constexpr uint8_t kModes = 12;
 #if defined(__AVR__)
-const kin::Offsets kModeOffsets[9] PROGMEM = {
+const kin::Offsets kModeOffsets[kModes] PROGMEM = {
 #else
-const kin::Offsets kModeOffsets[9] = {
+const kin::Offsets kModeOffsets[kModes] = {
 #endif
     {56.65f, 74.55f},  // 0 normal (suction cup)
     {64.4f, 51.04f},   // 1 laser
@@ -53,7 +57,10 @@ const kin::Offsets kModeOffsets[9] = {
     {76.0f, 73.4f},    // 5 stepper effector, standard
     {54.5f, 77.2f},    // 6 touch pen
     {56.65f, 74.55f},  // 7 user: 930/940, these if they are unusable (R-7)
-    {44.5f, 25.49f},   // 8 test
+    {0.0f, 0.0f},      // 8 claw jaw (0, 0 in the Pro block)
+    {56.65f, 74.55f},  // 9 steering gear
+    {56.65f, 74.55f},  // 10 clamp
+    {44.5f, 25.49f},   // 11 test (8 up to V4.9.x and jss.7)
 };
 float effect_offset = 0.0f;  // EEPROM 3202, the stepper effector's angle offset (M2412)
 bool tool_locked = true;     // M2203 N3 in modes 4/5 (the original's motor_state_bits 0x08)
@@ -65,6 +72,18 @@ bool power_reported = false, power_pending = false;
 bool limit_reported = false, limit_pending = false, limit_seen = false;
 uint32_t limit_since = 0, last_sample = 0, last_power = 0;
 float feed = 100.0f;                       // modal F, F100 after boot (Q-55)
+float into_feed = 0.0f;                    // G2209's F, for the move after its re-sync
+uint8_t laser_power = 255;                 // M5 P, kept between commands as 3.x does (uArmSwift.cpp:318)
+
+// M2212 N1: a write that crosses a page is written in two parts; each waits for the chip's write cycle.
+constexpr uint32_t kXWriteMs = 20;  // the chip's cycle is up to 5 ms; longer means it stopped answering
+struct XWrite {
+    uint8_t buf[4];
+    uint8_t n, done;
+    uint16_t addr;
+    uint32_t since;
+};
+XWrite xwrite;
 
 // A set of encoder reads, joint by joint (the original's order, L, R, B: uarm_protocol.c:1359-1361). There are two:
 // one for queries (async), one for re-syncs (sync); poll() gives the bus to one at a time.
@@ -239,7 +258,7 @@ bool poll_reads() {
 }
 
 // The sync job in progress.
-enum class Job : uint8_t { kNone, kResync, kLine, kDelay, kSearch, kReference, kHeight };
+enum class Job : uint8_t { kNone, kResync, kLine, kDelay, kSearch, kReference, kHeight, kIntoLimits, kXWrite };
 Job sync_job = Job::kNone;
 uint8_t resync_mask = 0;  // motion axes (bit 0 L, 1 R, 2 B)
 uint32_t delay_start = 0, delay_ms = 0;
@@ -258,6 +277,35 @@ void save_sys() {
 void save_user() {
     nvm::write(nvm::kUserFrontOffset, &offsets.front, sizeof offsets.front);
     nvm::write(nvm::kUserHeightOffset, &offsets.height, sizeof offsets.height);
+}
+
+// M2411 S / M2413 H / M2410 S: an offset from the number at p, saved also as the user offset (R-7: E21 if unusable).
+Status set_offset(bool front, const char* p) {
+    float v;
+    if (!parse::number(&p, 19, &v) || *p != '\0' || !usable(v)) return Status::kE21;
+    if (front) offsets.front = v;
+    else offsets.height = v;
+    motion::set_offsets(offsets);
+    save_sys();
+    save_user();
+    return Status::kOk;
+}
+
+// M2211/M2212 fields "N<0|1>A<address>T<1|2|4>" (V4.10.0 uarm_protocol.c:1773-1860, sscanf "N%dA%dT%d"). N0 is the
+// AVR's own EEPROM (3.x uArmAPI.cpp:686-730), N1 the external one; the address must leave room for T bytes (N1: at
+// most 65524, as V4.10.0).
+bool eeprom_fields(const char** p, uint8_t* device, uint16_t* addr, uint8_t* type) {
+    int16_t d = 0, t = 0;
+    float a = 0.0f;
+    if (!parse::expect(p, 'N') || !parse::integer(p, &d) || !parse::expect(p, 'A') || !parse::number(p, 19, &a) ||
+        !parse::expect(p, 'T') || !parse::integer(p, &t))
+        return false;
+    if ((d != 0 && d != 1) || (t != 1 && t != 2 && t != 4) || a < 0.0f || a != floorf(a)) return false;
+    if (a > (d == 0 ? static_cast<float>(nvm::kSize - static_cast<uint16_t>(t)) : 65524.0f)) return false;
+    *device = static_cast<uint8_t>(d);
+    *addr = static_cast<uint16_t>(a);
+    *type = static_cast<uint8_t>(t);
+    return true;
 }
 
 // M2400 (uarm_protocol.c:968-1031): the mode, its default offsets, saved. Changes (SP-57, Q-63): the wrist
@@ -437,6 +485,12 @@ Status query(uint16_t number, const char* p, fmt::Writer& tail) {
         tail.put(high ? " V1" : " V0");
         return Status::kOk;
     }
+    if (number == 2236) {  // base button N0 Menu, N1 Play: V0 pressed, V1 released (V4.10.0 uarm_protocol.c:2576-2589)
+        uint8_t n = 0;
+        if (!digit_param(p, 'N', '0', '1', &n)) return Status::kE21;
+        tail.put(report::button_down(n) ? " V0" : " V1");
+        return Status::kOk;
+    }
     if (number != 2206 && p[0] != '\0') return Status::kE21;  // Q-53: these take no parameters
     switch (number) {
         case 2201: tail.put(FLASH(" VSwiftPro")); return Status::kOk;  // uarm_swift.h:13, uarm_protocol.c:1370-1372
@@ -459,6 +513,7 @@ Status query(uint16_t number, const char* p, fmt::Writer& tail) {
         case 2233: tail.put(effector::limit_pressed() ? " V1" : " V0"); return Status::kOk;   // :1470-1472
         case 2234: tail.put(effector::power_present() ? " V1" : " V0"); return Status::kOk;   // :1474-1476
         case 2235: tail.put(effector::laser_on() ? " V1" : " V0"); return Status::kOk;        // :1478-1480
+        case 2245: return Status::kOk;  // 3.x: "ok" and nothing (uArmSwift.cpp:1454-1458, Q-80)
         case 2200:
         case 2220:
         case 2221:
@@ -552,7 +607,11 @@ Status setting(uint16_t number, const char* p) {
             watch_on = v == 1;
             for (uint8_t& f : faults) f = 0;
             return Status::kOk;
-        case 2124:  // SP-45, Q-32
+        case 2124:  // beep when a re-sync corrects the position (V4.10.0 uarm_protocol.c:1622-1632, Q-72)
+            if (!digit_param(p, 'V', '0', '1', &v)) return Status::kE21;
+            resync_beep = v == 1;
+            return Status::kOk;
+        case 2126:  // streaming replies (SP-45, Q-32; was M2124 until Q-72)
             if (!digit_param(p, 'V', '0', '1', &v)) return Status::kE21;
             stream = v == 1;
             return Status::kOk;
@@ -565,7 +624,7 @@ Status result_status(motion::Result r) {
         case motion::Result::kOk: return Status::kOk;
         case motion::Result::kBadParam: return Status::kE21;
         case motion::Result::kUnreachable: return Status::kE22;
-        case motion::Result::kReleased: return Status::kE25;
+        case motion::Result::kReleased: return Status::kE27;  // Q-70
         case motion::Result::kNoPosition: return Status::kE26;
         case motion::Result::kChecking: return Status::kPending;
     }
@@ -613,6 +672,21 @@ bool words(const char* p, float xyz[3], float* f) {
     }
     return true;
 }
+
+// Starts a re-sync of the joints in mask (motion axes: bit 0 L, 1 R, 2 B) from the encoders.
+Status resync(uint8_t mask) {
+    encoder::Joint joints[3];
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < 3; ++i)
+        if (mask & (1u << i)) joints[n++] = kLRB[i];
+    begin_reads(sync_reads, 0, encoder::Job::kAngle, n, joints);
+    resync_mask = mask;
+    sync_job = Job::kResync;
+    return Status::kPending;
+}
+
+// Joint numbers as in G2202: 0 base, 1 L, 2 R -> motion axes (0 L, 1 R, 2 B).
+uint8_t axis_of(uint8_t joint) { return joint == 0 ? 2 : static_cast<uint8_t>(joint - 1); }
 
 // F is modal: a valid F given with a move becomes the default for the next moves.
 void keep_feed(float f) {
@@ -667,6 +741,26 @@ Status gcode(uint16_t number, const char* p) {
             if (s == Status::kOk) keep_feed(f);
             return s;
         }
+        case 2207:    // linear jog N0 X, N1 Y, N2 Z (V4.10.0 uarm_protocol.c:408-1220, A4)
+        case 2208: {  // joint jog N0 base, N1 L, N2 R (:1222-1329); F's sign is the direction, F is not kept
+            if (p[0] != 'N' || p[1] < '0' || p[1] > '2') return Status::kE21;
+            const uint8_t n = static_cast<uint8_t>(p[1] - '0');
+            if (!fields(p + 2, "F", 1, v, &f)) return Status::kE21;
+            if (number == 2207) return moved(motion::jog_xyz(n, v[0]));
+            return moved(motion::jog_joint(axis_of(n), v[0]));
+        }
+        case 2209: {  // every joint back inside its limits, after a re-sync (:1331-1440, A4)
+            if (!fields(p, "", 0, v, &f) || !(f > 0.0f)) return Status::kE21;
+            for (uint8_t j = 0; j < 3; ++j)
+                if (!motion::locked(j)) return Status::kE27;  // Q-70
+            into_feed = f;
+            resync(7);
+            sync_job = Job::kIntoLimits;
+            return Status::kPending;
+        }
+        case 2203:  // wait until every queued move has finished (3.x Marlin_main.cpp:7642-7646, parity A7, Q-80); as
+                    // a normal sync command it runs only once motion is idle (Q-5)
+            return *p == '\0' ? Status::kOk : Status::kE21;
         case 2004: {  // delay before the next sync command; P <= 0 is no delay (Q-50, SP-55)
             int16_t ms = 0;
             if (!parse::expect(&p, 'P') || !parse::integer(&p, &ms) || *p != '\0') return Status::kE21;
@@ -679,21 +773,6 @@ Status gcode(uint16_t number, const char* p) {
         default: return Status::kE20;
     }
 }
-
-// Starts a re-sync of the joints in mask (motion axes: bit 0 L, 1 R, 2 B) from the encoders.
-Status resync(uint8_t mask) {
-    encoder::Joint joints[3];
-    uint8_t n = 0;
-    for (uint8_t i = 0; i < 3; ++i)
-        if (mask & (1u << i)) joints[n++] = kLRB[i];
-    begin_reads(sync_reads, 0, encoder::Job::kAngle, n, joints);
-    resync_mask = mask;
-    sync_job = Job::kResync;
-    return Status::kPending;
-}
-
-// Joint numbers as in G2202: 0 base, 1 L, 2 R -> motion axes (0 L, 1 R, 2 B).
-uint8_t axis_of(uint8_t joint) { return joint == 0 ? 2 : static_cast<uint8_t>(joint - 1); }
 
 Status mcode(uint16_t number, const char* p, fmt::Writer& tail) {
     uint8_t n = 0;
@@ -737,6 +816,65 @@ Status mcode(uint16_t number, const char* p, fmt::Writer& tail) {
             if (tool::active()) return Status::kE20;  // PH5/PH6 drive the effector stepper (SP-61, Q-67)
             effector::laser(n == 1);
             return Status::kOk;
+        case 3:    // 3.x laser off, M5 [P<0-255>] laser on (uArmSwift.cpp:285-332, Q-80); the reverse of the CNC
+        case 5: {  // convention, as 3.x. Only in mode 1; elsewhere ok and nothing (pen mode only waited). No PWM yet
+            if (number == 5 && *p == 'P') {
+                int16_t power = 0;
+                ++p;
+                if (!parse::integer(&p, &power) || power < 0 || power > 255) return Status::kE21;
+                laser_power = static_cast<uint8_t>(power);
+            }
+            if (*p != '\0') return Status::kE21;
+            if (mode == 1) effector::laser(number == 5 && laser_power > 0);
+            return Status::kOk;
+        }
+        case 2211: {  // EEPROM read: N0 the AVR's (3.x), N1 the external one (V4.10.0). E26 if the chip doesn't answer
+            uint8_t device, type;
+            uint16_t addr;
+            if (!eeprom_fields(&p, &device, &addr, &type) || *p != '\0') return Status::kE21;
+            uint8_t b[4] = {};
+            if (device == 0) nvm::read(addr, b, type);
+            else if (!xeeprom::read(addr, b, type)) return Status::kE26;
+            tail.put(" V");
+            if (type == 1) {
+                tail.u16(b[0]);
+            } else if (type == 2) {  // N0 little-endian (EEPROM.get), N1 big-endian (uarm_peripheral.c:497-500)
+                tail.i16(static_cast<int16_t>(device == 0 ? b[0] | (b[1] << 8) : (b[0] << 8) | b[1]));
+            } else {
+                float f;
+                memcpy(&f, b, sizeof f);
+                tail.f4(f);
+            }
+            return Status::kOk;
+        }
+        case 2212: {  // external EEPROM write, N1 only: N0 is refused (Q-80), a wrong byte at 800-821 ruins the calibration
+            uint8_t device, type;
+            uint16_t addr;
+            float v;
+            if (!eeprom_fields(&p, &device, &addr, &type) || device != 1 || !parse::expect(&p, 'V') ||
+                !parse::number(&p, 19, &v) || *p != '\0')
+                return Status::kE21;
+            XWrite& w = xwrite;
+            w.n = type;
+            if (type == 1) {
+                if (v < 0.0f || v > 255.0f) return Status::kE21;
+                w.buf[0] = static_cast<uint8_t>(v);
+            } else if (type == 2) {
+                if (v < -32768.0f || v > 32767.0f) return Status::kE21;
+                const int16_t i = static_cast<int16_t>(v);
+                w.buf[0] = static_cast<uint8_t>(static_cast<uint16_t>(i) >> 8);
+                w.buf[1] = static_cast<uint8_t>(i & 0xFF);
+            } else {
+                memcpy(w.buf, &v, sizeof v);
+            }
+            w.addr = addr;
+            const uint8_t room = static_cast<uint8_t>(xeeprom::kPage - addr % xeeprom::kPage);
+            w.done = type < room ? type : room;  // the first part: up to the end of the page
+            if (!xeeprom::write(addr, w.buf, w.done)) return Status::kE26;
+            w.since = tick::now_ms();
+            sync_job = Job::kXWrite;
+            return Status::kPending;
+        }
         case 2210: {  // buzzer: F in Hz, T in ms (SP-24)
             float hz;
             int16_t ms;
@@ -766,31 +904,29 @@ Status mcode(uint16_t number, const char* p, fmt::Writer& tail) {
             else pins::set_output(pn, value == 1);
             return Status::kOk;
         }
-        case 2400:  // work mode (uarm_protocol.c:968-1031)
-            if (!digit_param(p, 'S', '0', '8', &n)) return Status::kE21;
-            return set_mode(n);
-        case 2401:  // the encoder reference ("point B") from the current position (uarm_angle.c:273-279)
-            if (*p != '\0') return Status::kE21;
+        case 2400: {  // work mode S0-S11 (V4.10.0 uarm_protocol.c:2032-2110; S10 and S11 really reach 10 and 11, Q-76)
+            int16_t m = 0;
+            if (!parse::expect(&p, 'S') || !parse::integer(&p, &m) || *p != '\0' || m < 0 || m >= kModes)
+                return Status::kE21;
+            return set_mode(static_cast<uint8_t>(m));
+        }
+        case 2401:  // the encoder reference ("point B") from the current position (uarm_angle.c:273-279); "B" as 3.x
+                    // (uArmSwift.cpp:1168-1188, Q-80). 3.x's "V<unlock code>" (the main reference) is not ported
+            if (*p != '\0' && !(p[0] == 'B' && p[1] == '\0')) return Status::kE21;
             begin_reads(sync_reads, 0, encoder::Job::kAngle, 3, kLRB);
             sync_job = Job::kReference;
             return Status::kPending;
-        case 2410:  // height offset = the arm's current Z from the encoders (uarm_protocol.c:1039-1058)
+        case 2410:  // height offset = the arm's current Z from the encoders (uarm_protocol.c:1039-1058); with S, the
+                    // value given, as M2413 H (3.x uArmSwift.cpp:1214-1240, Q-80)
+            if (*p == 'S') return set_offset(false, p + 1);
             if (*p != '\0') return Status::kE21;
             begin_reads(sync_reads, 0, encoder::Job::kAngle, 3, kLRB);
             sync_job = Job::kHeight;
             return Status::kPending;
         case 2411:    // front offset S (uarm_protocol.c:1060-1076)
         case 2413: {  // height offset H (:1095-1110)
-            float v;
-            if (!parse::expect(&p, number == 2411 ? 'S' : 'H') || !parse::number(&p, 19, &v) || *p != '\0' ||
-                !usable(v))
-                return Status::kE21;
-            if (number == 2411) offsets.front = v;
-            else offsets.height = v;
-            motion::set_offsets(offsets);
-            save_sys();
-            save_user();
-            return Status::kOk;
+            if (!parse::expect(&p, number == 2411 ? 'S' : 'H')) return Status::kE21;
+            return set_offset(number == 2411, p);
         }
         case 2412: {  // effector angle offset V, then a new origin search in modes 4/5 (uarm_protocol.c:1078-1093)
             float v;
@@ -856,7 +992,7 @@ void init() {
     mode = nvm::read_byte(nvm::kWorkMode);
     nvm::read(nvm::kFrontOffset, &offsets.front, sizeof offsets.front);
     nvm::read(nvm::kHeightOffset, &offsets.height, sizeof offsets.height);
-    if (mode > 8 || !usable(offsets.front) || !usable(offsets.height)) {  // R-7: erased or damaged EEPROM
+    if (mode >= kModes || !usable(offsets.front) || !usable(offsets.height)) {  // R-7: erased or damaged EEPROM
         mode = 0;
         offsets = kin::Offsets{kDefaultFront, kDefaultHeight};
     }
@@ -889,6 +1025,7 @@ void init() {
     }
     recover = Recover::kNone;
     stream = false;
+    resync_beep = false;
     run_flag = false;
     feed = 100.0f;
     sync_job = Job::kNone;
@@ -914,7 +1051,7 @@ void init() {
 Kind kind(const parse::Command& c) {
     if (c.family == 'G') {
         switch (c.number) {
-            case 0: case 1: case 2201: case 2204: case 2205: case 2206: return Kind::kMotion;
+            case 0: case 1: case 2201: case 2204: case 2205: case 2206: case 2207: case 2208: return Kind::kMotion;
             case 2202: return c.params[0] == 'N' && c.params[1] == '3' ? Kind::kNormal : Kind::kMotion;  // N3: wrist
             default: break;
         }
@@ -951,6 +1088,38 @@ Status resume_sync(fmt::Writer&) {
                 angles[static_cast<uint8_t>(j)] = encoder::angle(j, sync_reads.raw[k]);
             }
             motion::sync(resync_mask, angles);
+            return Status::kOk;
+        }
+        case Job::kIntoLimits: {  // G2209: the re-sync, then the move
+            if (!sync_reads.done) return Status::kPending;
+            sync_reads.active = false;
+            sync_job = Job::kNone;
+            float angles[3] = {};
+            for (uint8_t k = 0; k < 3; ++k) {
+                if (!sync_reads.ok[k]) return Status::kE26;
+                angles[k] = encoder::angle(kLRB[k], sync_reads.raw[k]);
+            }
+            motion::sync(7, angles);
+            return moved(motion::into_limits(into_feed));
+        }
+        case Job::kXWrite: {  // M2212: wait for the write cycle, write the rest of a split write, wait again
+            XWrite& w = xwrite;
+            if (!xeeprom::ready()) {
+                if (tick::now_ms() - w.since <= kXWriteMs) return Status::kPending;
+                sync_job = Job::kNone;
+                return Status::kE26;
+            }
+            if (w.done < w.n) {
+                const uint8_t rest = static_cast<uint8_t>(w.n - w.done);
+                if (!xeeprom::write(static_cast<uint16_t>(w.addr + w.done), w.buf + w.done, rest)) {
+                    sync_job = Job::kNone;
+                    return Status::kE26;
+                }
+                w.done = w.n;
+                w.since = tick::now_ms();
+                return Status::kPending;
+            }
+            sync_job = Job::kNone;
             return Status::kOk;
         }
         case Job::kLine: {
@@ -1035,7 +1204,20 @@ void poll_events() {
 
 namespace {
 
-// After a lost-step stop: once motion has stopped, re-read the locked joints and re-sync their tally (Q-6).
+// M2124 V1 (Q-72): whether re-syncing the joints in mask to angles (base in the user frame) moves a known joint's tally
+// by more than kResyncBeepDeg.
+bool corrects(uint8_t mask, const float angles[3]) {
+    float tally[3];
+    motion::tally_angles(tally);
+    for (uint8_t a = 0; a < 3; ++a) {
+        if (!(mask & motion::known_joints() & (1u << a))) continue;
+        if (fabsf(angles[a] - (tally[a] + (a == 2 ? 90.0f : 0.0f))) > kResyncBeepDeg) return true;
+    }
+    return false;
+}
+
+// After a stop (S1100, Ctrl-X, lost steps): once motion has stopped, re-read the locked joints and re-sync their tally
+// (Q-6, Q-71).
 void poll_recover() {
     if (recover == Recover::kWait && motion::idle()) {
         encoder::Joint joints[3];
@@ -1070,6 +1252,7 @@ void poll_recover() {
         angles[static_cast<uint8_t>(j)] = encoder::angle(j, sync_reads.raw[k]);
         mask = static_cast<uint8_t>(mask | (1u << static_cast<uint8_t>(j)));
     }
+    if (resync_beep && corrects(mask, angles)) buzzer::tone(1000.0f, 260);  // beep_tone(260, 1000), :1059-1060
     motion::sync(mask, angles);
 }
 
@@ -1108,7 +1291,10 @@ void stop() {
     // A sync job is abandoned (its command is answered E25 by the protocol). A read on the bus finishes there.
     sync_job = Job::kNone;
     sync_reads.active = false;
+    recover = Recover::kWait;  // re-sync from the encoders once at rest (Q-71; V4.10.0 serial.c:364-385)
 }
+
+void hold(bool on) { motion::hold(on); }
 
 // A move's reply also waits for its final lost-step check (SP-41), and for the re-sync after a lost-step stop.
 bool checked() { return !check_due[0] && !check_due[1] && !check_due[2] && recover == Recover::kNone && !lost; }
